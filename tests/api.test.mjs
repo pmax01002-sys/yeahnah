@@ -5,7 +5,7 @@
 //   SUPABASE_URL=... SUPABASE_ANON_KEY=... SUPABASE_SERVICE_KEY=... npm test
 // It creates test users. Never point it at a project with real people in it.
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createClient } from '@supabase/supabase-js';
 
@@ -35,10 +35,22 @@ const qid = async (c, text) => (await ok(c.from('questions').select('id').eq('te
 
 let alice, bob, tia, daily, others;
 
+const yearsAgo = n => new Date(Date.now() - n * 365.25 * 864e5).toISOString().slice(0, 10);
+const setMinAge = n => ok(admin.from('app_config').update({ value: n }).eq('key', 'min_age'));
+after(() => setMinAge(18));
+
+test('sign-up is 18+ for now', async () => {
+  const kid = await user('kid17');
+  await fails(kid.rpc('create_profile', { p_handle: `kid17_${run}`, p_display_name: 'kid', p_birth_date: yearsAgo(17) }), /18 and over/);
+});
+
 test('setup: three people sign up', async () => {
+  // The under-18 rules stay in the code for when min_age comes back down,
+  // so open sign-up to 13+ for the rest of the run to keep them checked.
+  await setMinAge(13);
   alice = await user('alice', '1990-05-01');
   bob = await user('bob', '1988-02-02');
-  tia = await user('tia', new Date(Date.now() - 15 * 365.25 * 864e5).toISOString().slice(0, 10));
+  tia = await user('tia', yearsAgo(15));
   const kid = await user('kid');
   await fails(kid.rpc('create_profile', { p_handle: `kid_${run}`, p_display_name: 'kid', p_birth_date: '2020-01-01' }), /13 and over/);
   await fails(kid.rpc('create_profile', { p_handle: alice.handle, p_display_name: 'x', p_birth_date: '1990-01-01' }), /taken/);
@@ -65,6 +77,15 @@ test('questions: today is the flat Earth, tomorrow stays hidden, under-18s never
   const tq = await ok(tia.from('questions').select('sensitivity'));
   assert.ok(!tq.some(q => q.sensitivity === 'sensitive'));
   others = qs.filter(q => !q.daily_date && !q.is_event && q.sensitivity === 'standard').map(q => q.id).sort((a, b) => a - b);
+});
+
+test('themed packs: every theme has questions, and picks keep both options', async () => {
+  const qs = await ok(alice.from('questions').select('text,category,option_yes,option_no').eq('is_event', false));
+  const count = t => qs.filter(q => q.category === t).length;
+  for (const t of ['Sport', 'Music', 'Film & TV', 'Travel', 'Work', 'Dating', 'Food', 'Mysteries', 'Future', 'Nostalgia', 'Brands'])
+    assert.ok(count(t) >= 7, `${t} has ${count(t)}`);
+  const pick = qs.find(q => q.text === 'Messi or Ronaldo?');
+  assert.deepEqual([pick.option_yes, pick.option_no], ['Messi', 'Ronaldo']);
 });
 
 test('the crowd split only shows after you answer', async () => {
@@ -214,7 +235,7 @@ test('friend groups: invite link, everyone becomes friends, answers per question
   const host = await user('host', '1991-01-01');
   const g1 = await user('gina', '1993-03-03');
   const g2 = await user('gus', '1994-04-04');
-  const teen = await user('teen', new Date(Date.now() - 16 * 365.25 * 864e5).toISOString().slice(0, 10));
+  const teen = await user('teen', yearsAgo(16));
   const anon = createClient(URL, ANON, opts);
 
   const g = await ok(host.rpc('create_group', { p_name: 'Pub quiz lot' }));

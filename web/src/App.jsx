@@ -162,7 +162,7 @@ function CreateProfile({ onDone }) {
         <input required maxLength={40} value={f.name} onChange={set('name')} /></label>
       <label className="field"><span className="label">Date of birth</span>
         <input type="date" required value={f.birth} onChange={set('birth')} /></label>
-      <p className="hint">You must be 13 or over. Under-18s get a friends-only profile and no sensitive questions. Your date of birth is never shown to anyone.</p>
+      <p className="hint">yeah/nah is 18+ for now. Your date of birth is never shown to anyone.</p>
       <Msg error={error} />
       <button className="solid">Start answering</button>
     </form></div>
@@ -442,19 +442,49 @@ function Today(ctx) {
   );
 }
 
+const THEME_EMOJI = {
+  Sport: '⚽', Music: '🎵', 'Film & TV': '🎬', Travel: '✈️', Work: '💼', Dating: '💘', Food: '🍕',
+  Mysteries: '🛸', Future: '🚀', Nostalgia: '📼', Brands: '🏷️', 'Big debates': '🔥', Beliefs: '✨',
+  Ethics: '⚖️', Fitness: '🏃', Lifestyle: '🛋️', Money: '💷', Politics: '🗳️', Tech: '💻', 'Wild cards': '🃏',
+};
+
 function Questions(ctx) {
   const { d, inbox } = ctx;
   const [filter, setFilter] = useState('all');
+  const [theme, setTheme] = useState(null);
   const sent = new Set(inbox.map(c => c.question_id));
   const F = { all: 'All', open: 'Not answered', sent: 'Sent to you', standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive' };
   const qs = d.questions.filter(q => !q.is_event && q.status === 'approved');
-  const list = qs.filter(q => filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter));
+  const byTheme = {};
+  for (const q of qs) {
+    const t = byTheme[q.category] || (byTheme[q.category] = { name: q.category, total: 0, done: 0 });
+    t.total++;
+    if (d.mine[q.id]) t.done++;
+  }
+  const themes = Object.values(byTheme).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  const list = qs.filter(q => (!theme || q.category === theme)
+    && (filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)));
+  const picked = byTheme[theme];
   return (
     <>
+      <div className="themes" role="group" aria-label="Themes">
+        {themes.map(t => (
+          <button key={t.name} className="theme" aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
+            <span className="e" aria-hidden="true">{THEME_EMOJI[t.name] || '💬'}</span>
+            <span className="n">{t.done}/{t.total}</span>
+            <b>{t.name}</b>
+            <span className="bar"><i style={{ width: `${(100 * t.done) / t.total}%` }} /></span>
+          </button>
+        ))}
+      </div>
       <div className="filters" role="group" aria-label="Filter">
         {Object.entries(F).map(([k, v]) => <button key={k} aria-pressed={filter === k} onClick={() => setFilter(k)}>{v}</button>)}
       </div>
-      <p className="hint" style={{ margin: '4px 2px 10px' }}>{Object.keys(d.mine).length} answered · showing {list.length}</p>
+      <p className="hint" style={{ margin: '4px 2px 10px' }}>
+        {picked
+          ? <>{picked.name}: {picked.done} of {picked.total} answered · showing {list.length} · <button className="linkbtn" onClick={() => setTheme(null)}>All themes</button></>
+          : <>{Object.keys(d.mine).length} answered · showing {list.length}</>}
+      </p>
       <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} />)}</div>
       <SuggestQuestion />
     </>
