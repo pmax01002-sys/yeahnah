@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
-import { siteUrl, shareLink, onInviteOpened } from './native.js';
+import { isNative, siteUrl, shareLink, onInviteOpened } from './native.js';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -144,10 +144,16 @@ function SignIn() {
           value={password} onChange={e => setPassword(e.target.value)} /></label>
       <Msg error={error} note={note} />
       <button className="solid" disabled={busy}>{mode === 'signin' ? 'Sign in' : 'Create account'}</button>
-      <p className="hint">Demo build. Credits are free play credits with no money value.</p>
+      <p className="hint">Demo build. Credits are free play credits with no money value. <PrivacyLink>How we handle your data</PrivacyLink></p>
     </form></div>
   );
 }
+
+// The phone apps open the bundled notice in place (it has its own Back link),
+// since a new window has nowhere to go inside the app.
+const PrivacyLink = ({ children }) => isNative
+  ? <a href="/privacy.html">{children}</a>
+  : <a href="/privacy.html" target="_blank" rel="noopener">{children}</a>;
 
 function CreateProfile({ onDone }) {
   const [f, setF] = useState({ handle: '', name: '', birth: '' });
@@ -170,7 +176,7 @@ function CreateProfile({ onDone }) {
         <input required maxLength={40} value={f.name} onChange={set('name')} /></label>
       <label className="field"><span className="label">Date of birth</span>
         <input type="date" required value={f.birth} onChange={set('birth')} /></label>
-      <p className="hint">yeah/nah is 18+ for now. Your date of birth is never shown to anyone.</p>
+      <p className="hint">yeah/nah is 18+ for now. Your date of birth is never shown to anyone. <PrivacyLink>Privacy notice</PrivacyLink></p>
       <Msg error={error} />
       <button className="solid">Start answering</button>
     </form></div>
@@ -646,8 +652,9 @@ function Friends({ d, reload, open, now, inbox }) {
           {card.i_follow
             ? <button className="ghost" onClick={() => follow(cardId, false)}>Unfollow</button>
             : <button className="solid" onClick={async () => {
-                const { data } = await supabase.from('profiles').select('id').eq('handle', card.handle).single();
-                follow(data.id, true);
+                // Cards carry the id since the 2026-10-11 database update; before it, look it up.
+                const id = card.id || (await supabase.from('profiles').select('id').eq('handle', card.handle).single()).data?.id;
+                follow(id, true);
               }}>{card.follows_me ? 'Follow back' : 'Follow'}</button>}
         </div>
       )}
@@ -769,7 +776,7 @@ function Profile({ d, reload }) {
 
       <div className="section"><h2>Your data</h2>
         <div className="panel">
-          <p className="hint">We never sell your answers. Brands only ever see totals for groups of 100+ people.</p>
+          <p className="hint">We never sell your answers. Brands only ever see totals for groups of 100+ people. <PrivacyLink>Privacy notice</PrivacyLink></p>
           <button className="ghost" onClick={download}>Download my data</button>
           <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
           <button className="ghost danger" onClick={del}>Delete my account</button>
@@ -811,7 +818,7 @@ function Groups({ d, reload, open }) {
     setError(''); setNote('');
     try { if (await shareLink({ title: 'yeah/nah', text, url: link })) return; }
     catch (err) { if (err.name === 'AbortError' || /cancel/i.test(err.message)) return; }
-    try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text.'); }
+    try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text. Anyone with the link can join, so only send it to friends.'); }
     catch { setNote(`Send your friends this link: ${link}`); }
   }
 
@@ -872,8 +879,18 @@ function Groups({ d, reload, open }) {
         {g.created_by === d.me.id
           ? <button className="linkbtn" onClick={() => act('reset_invite', { p_group: g.id }, 'New invite link made. The old one no longer works.')}>Reset invite link</button>
           : <span />}
-        <button className="linkbtn danger" onClick={() => window.confirm(`Leave ${g.name}?`) && act('leave_group', { p_group: g.id })}>Leave group</button>
+        <button className="linkbtn danger" onClick={() => window.confirm(`Leave ${g.name}? You stop being friends with people you only know through it.`) && act('leave_group', { p_group: g.id })}>Leave group</button>
       </div>
+      {g.created_by === d.me.id && people.length > 1 && (
+        <details><summary className="hint">Remove someone</summary>
+          <div className="chips" style={{ marginTop: 8 }}>
+            {people.filter(p => p.id !== d.me.id).map(p => (
+              <button key={p.id} className="chip" onClick={() => window.confirm(`Remove ${p.display_name} from ${g.name}? They won't be able to rejoin with the invite link.`)
+                && act('remove_member', { p_group: g.id, p_user: p.id }, `${p.display_name} was removed.`)}>{p.display_name} ✕</button>
+            ))}
+          </div>
+        </details>
+      )}
       {d.me.is_adult && d.groups.length < 5 && <details><summary className="hint">Make another group</summary>{makeForm}</details>}
     </div>
   );

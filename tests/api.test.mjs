@@ -37,7 +37,8 @@ let alice, bob, tia, daily, others;
 
 const yearsAgo = n => new Date(Date.now() - n * 365.25 * 864e5).toISOString().slice(0, 10);
 const setMinAge = n => ok(admin.from('app_config').update({ value: n }).eq('key', 'min_age'));
-after(() => setMinAge(18));
+const setDefaultPublic = n => ok(admin.from('app_config').update({ value: n }).eq('key', 'new_answers_public'));
+after(() => Promise.all([setMinAge(18), setDefaultPublic(1)]));
 
 test('sign-up is 18+ for now', async () => {
   const kid = await user('kid17');
@@ -135,6 +136,18 @@ test('visibility: friends-only needs a follow-back, private never shows, under-1
   await fails(tia.rpc('set_visibility', { p_question: others[0], p_visibility: 'public' }), /friends at most/);
 });
 
+test('new answers start public or friends-only, as app_config says', async () => {
+  await setDefaultPublic(0);
+  const nia = await user('nia', '1996-06-06');
+  const mine = async q => (await ok(nia.from('statements').select('visibility').eq('user_id', (await me(nia)).id).eq('question_id', q)))[0].visibility;
+  await ok(nia.rpc('answer', { p_question: others[0], p_value: true }));
+  assert.equal(await mine(others[0]), 'friends');
+  // She never picked one herself, so nothing carries over and the setting decides.
+  await setDefaultPublic(1);
+  await ok(nia.rpc('answer', { p_question: others[1], p_value: true }));
+  assert.equal(await mine(others[1]), 'public');
+});
+
 test('people can only read their own birth date, and can only write through the app functions', async () => {
   await fails(bob.from('profiles').select('birth_date'));
   await ok(bob.from('profiles').select('handle,display_name'));
@@ -152,6 +165,20 @@ test('sensitive questions need an 18+ opt-in and start private', async () => {
   const s = await ok(bob.from('statements').select('visibility').eq('question_id', god));
   assert.deepEqual(s, [{ visibility: 'private' }]);
   await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: god, p_minutes: 60 }), /Sensitive/);
+});
+
+test('nobody can list strangers; finding an exact handle still works', async () => {
+  const stranger = await user('stranger', '1992-01-01');
+  assert.deepEqual((await ok(stranger.from('profiles').select('handle'))).map(r => r.handle), [stranger.handle]);
+  const aliceSees = (await ok(alice.from('profiles').select('handle'))).map(r => r.handle);
+  assert.ok(aliceSees.includes(bob.handle), 'friends are listed');
+  assert.ok(!aliceSees.includes(stranger.handle), 'strangers are not');
+  const card = await ok(stranger.rpc('profile_card', { p_handle: alice.handle }));
+  assert.equal(card.display_name, 'alice');
+  await ok(stranger.from('follows').insert({ follower: (await me(stranger)).id, followed: card.id }));
+  assert.ok((await ok(stranger.from('profiles').select('handle'))).some(r => r.handle === alice.handle));
+  assert.ok((await ok(alice.from('profiles').select('handle'))).some(r => r.handle === stranger.handle), 'a follower shows up as a request');
+  await ok(stranger.rpc('delete_my_account'));
 });
 
 test('sending a question costs 3 credits; answering in time earns 2 and skips the daily limit', async () => {
@@ -225,7 +252,10 @@ test('partner apps write verified answers from the server only', async () => {
 test('download my data and delete my account', async () => {
   const data = await ok(alice.rpc('export_my_data'));
   assert.equal(data.profile.handle, alice.handle);
+  assert.equal(data.email, `alice.${run}@example.com`);
   assert.ok(data.statements.length >= 5);
+  for (const k of ['groups', 'questions_sent', 'suggested_questions', 'reports', 'feedback']) assert.ok(Array.isArray(data[k]), k);
+  assert.ok(data.questions_sent.length >= 1, 'bob sent alice a question');
   await ok(tia.rpc('delete_my_account'));
   const gone = await ok(admin.from('profiles').select('id').eq('handle', tia.handle));
   assert.deepEqual(gone, []);
@@ -285,6 +315,36 @@ test('friend groups: invite link, everyone becomes friends, answers per question
   // Leaving removes you from the board.
   await ok(g2.rpc('leave_group', { p_group: g.id }));
   await fails(g2.rpc('group_board', { p_group: g.id }), /not in that group/);
+});
+
+test('leaving or being removed from a group ends the friendships it made', async () => {
+  const host = await user('host2', '1990-02-02');
+  const [m1, m2, pal] = [await user('mo', '1991-01-01'), await user('mia', '1992-02-02'), await user('pal', '1993-03-03')];
+  const id = async c => (await me(c)).id;
+  const friends = async (a, b) => (await ok(a.rpc('profile_card', { p_handle: b.handle }))).is_friend;
+  // Pal and the host were friends before the group.
+  await ok(pal.from('follows').insert({ follower: await id(pal), followed: await id(host) }));
+  await ok(host.from('follows').insert({ follower: await id(host), followed: await id(pal) }));
+  const g = await ok(host.rpc('create_group', { p_name: 'Five a side' }));
+  const other = await ok(host.rpc('create_group', { p_name: 'Book club' }));
+  for (const c of [m1, m2, pal]) await ok(c.rpc('join_group', { p_code: g.invite_code }));
+  await ok(m2.rpc('join_group', { p_code: other.invite_code }));
+  assert.equal(await friends(m1, m2), true);
+
+  // Pal leaves: still friends with the host (made before), not with Mo.
+  await ok(pal.rpc('leave_group', { p_group: g.id }));
+  assert.equal(await friends(pal, host), true);
+  assert.equal(await friends(pal, m1), false);
+  assert.deepEqual((await ok(pal.from('profiles').select('handle'))).map(r => r.handle).sort(), [host.handle, pal.handle].sort());
+
+  // Only the creator removes people, and they can't rejoin with the link.
+  await fails(m1.rpc('remove_member', { p_group: g.id, p_user: await id(m2) }), /Only the person/);
+  await fails(host.rpc('remove_member', { p_group: g.id, p_user: await id(host) }), /Leave the group/);
+  await ok(host.rpc('remove_member', { p_group: g.id, p_user: await id(m2) }));
+  assert.equal(await friends(m2, m1), false);
+  assert.equal(await friends(m2, host), true, 'still friends through the other group');
+  await fails(m2.rpc('join_group', { p_code: g.invite_code }), /removed/);
+  await fails(m2.rpc('group_board', { p_group: g.id }), /not in that group/);
 });
 
 test('feedback lands in a table only its author (and the owner) can read', async () => {

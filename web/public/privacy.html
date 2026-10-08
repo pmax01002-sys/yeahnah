@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Your data on yeah/nah</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Figtree:wght@400;600;700&display=swap" />
+<style>
+  :root {
+    --bg: #E9EBF1; --frame: #F7F8FB; --surface: #FFFFFF; --ink: #151829; --muted: #62677F; --line: #DCDFE8;
+    --yes: #10875F; --no: #C93C35;
+    --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --body: "Figtree", "Segoe UI", system-ui, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #080A14; --frame: #11131F; --surface: #1A1D2D; --ink: #ECEDF5; --muted: #9A9EB6; --line: #2B2F44;
+            --yes: #35C493; --no: #F2716A; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
+  main { max-width: 440px; margin: 0 auto; background: var(--frame); min-height: 100vh; padding: 20px 16px 40px; }
+  @media (min-width: 480px) { main { margin: 16px auto; min-height: 0; border: 1px solid var(--line); border-radius: 28px; padding: 24px 22px 36px; } }
+  a { color: inherit; text-underline-offset: 3px; }
+  .back { font-weight: 600; font-size: 14px; color: var(--muted); }
+  .brand { font-family: var(--display); font-weight: 800; color: var(--muted); }
+  .brand span { color: var(--yes); } .brand em { font-style: normal; color: var(--no); }
+  h1 { font-family: var(--display); font-weight: 800; font-size: 30px; line-height: 1.05; letter-spacing: -.025em; margin: 18px 0 6px; }
+  h2 { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: -.015em; margin: 28px 0 8px; }
+  p, ul { margin: 0 0 10px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; margin: 4px 0 12px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-top: 1px solid var(--line); }
+  thead th { border-top: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+  tbody th { font-weight: 600; width: 40%; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">← Back to <span class="brand"><span>yeah</span>/<em>nah</em></span></a>
+
+  <h1>Your data on yeah/nah</h1>
+  <p class="muted">Last updated 8 October 2026</p>
+  <p>yeah/nah is an early test version shared with friends. We keep only what the app needs to work, you choose who sees each answer, and you can delete everything yourself at any time.</p>
+
+  <h2>What we keep</h2>
+  <ul>
+    <li>Your email address and password. The password is stored scrambled, so nobody can read it.</li>
+    <li>Your handle, the name people see and your date of birth.</li>
+    <li>Your answers, including earlier answers you changed, and who you chose to show each one to.</li>
+    <li>Who you follow, the groups you're in, questions you send to or get from friends, your guesses and your play credits.</li>
+    <li>Questions you suggest, reports you make and feedback you send.</li>
+    <li>When you signed up, and when you turned sensitive questions on or off.</li>
+    <li>Standard technical logs kept by the services that run the app, such as IP addresses and sign-in times, used to keep it secure.</li>
+  </ul>
+  <p>We use it only to run the app: your daily question, crowd results, friends, groups and guesses. There are no ads and no analytics trackers. The app keeps you signed in using your browser's storage.</p>
+
+  <h2>Who can see it</h2>
+  <table>
+    <thead><tr><th>What</th><th>Who sees it</th></tr></thead>
+    <tbody>
+      <tr><th>Email, password, date of birth</th><td>Nobody else.</td></tr>
+      <tr><th>Handle and name</th><td>People you're connected to (friends, followers, your groups), and anyone who types your exact handle. If you make a group, anyone with its invite link sees your name.</td></tr>
+      <tr><th>Answers set to Public</th><td>Anyone signed in to yeah/nah.</td></tr>
+      <tr><th>Answers set to Friends</th><td>People you follow who follow you back. Everyone in your groups counts as a friend.</td></tr>
+      <tr><th>Answers set to Private</th><td>Only you.</td></tr>
+      <tr><th>Crowd results</th><td>Everyone, as totals only, never with names.</td></tr>
+      <tr><th>Your guessing hit rate</th><td>Anyone who types your exact handle.</td></tr>
+      <tr><th>Feedback</th><td>Only the people running yeah/nah.</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li>When you change your mind, the new answer stays hidden from everyone else for 7 days.</li>
+    <li>In a group, you see how others answered a question only after you've answered it yourself.</li>
+    <li>Sensitive questions (religion, politics) only appear if you turn them on. Those answers start Private, and turning sensitive questions off makes them all Private again.</li>
+    <li>Anyone with a group's invite link can join it and become friends with its members, so only send links to people you know. Leaving a group ends the friendships it made.</li>
+  </ul>
+  <p>The people running yeah/nah can see everything in the database. They only look when they need to run or fix the app.</p>
+
+  <h2>Who we share it with</h2>
+  <p>Nobody, apart from the two services that run the app for us: <a href="https://supabase.com/privacy">Supabase</a> (database and sign-in) and <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> (delivers the app to your device). They handle it on our behalf under their data processing terms.</p>
+  <p>We don't sell your answers, and no brand gets any data during this test. If we ever offer brands results, they will only be totals for groups of 100 or more people, never sensitive answers, and we'll update this page and tell you before it starts.</p>
+
+  <h2>Getting a copy, or deleting it</h2>
+  <ul>
+    <li><strong>A copy:</strong> Profile, then Download my data. You get everything stored in your account as a file.</li>
+    <li><strong>Delete everything:</strong> Profile, then Delete my account. Your account, answers, follows, guesses and group places go straight away. Groups you made stay for their other members, and questions you suggested and feedback you sent stay without your name.</li>
+    <li><strong>Anything else</strong>, like correcting something or a question about your data: tap Feedback in the app and tell us what you need.</li>
+  </ul>
+  <p>If you're unhappy with how we handle your data, you can complain to the Information Commissioner's Office at <a href="https://ico.org.uk/make-a-complaint/">ico.org.uk</a>.</p>
+
+  <h2>Age</h2>
+  <p>yeah/nah is for people aged 18 and over. If you think someone younger has signed up, tell us through Feedback.</p>
+</main>
+</body>
+</html>
