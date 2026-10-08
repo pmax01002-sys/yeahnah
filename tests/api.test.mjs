@@ -252,7 +252,10 @@ test('partner apps write verified answers from the server only', async () => {
 test('download my data and delete my account', async () => {
   const data = await ok(alice.rpc('export_my_data'));
   assert.equal(data.profile.handle, alice.handle);
+  assert.equal(data.email, `alice.${run}@example.com`);
   assert.ok(data.statements.length >= 5);
+  for (const k of ['groups', 'questions_sent', 'suggested_questions', 'reports', 'feedback']) assert.ok(Array.isArray(data[k]), k);
+  assert.ok(data.questions_sent.length >= 1, 'bob sent alice a question');
   await ok(tia.rpc('delete_my_account'));
   const gone = await ok(admin.from('profiles').select('id').eq('handle', tia.handle));
   assert.deepEqual(gone, []);

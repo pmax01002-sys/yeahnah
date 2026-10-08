@@ -136,10 +136,12 @@ function SignIn() {
           value={password} onChange={e => setPassword(e.target.value)} /></label>
       <Msg error={error} note={note} />
       <button className="solid" disabled={busy}>{mode === 'signin' ? 'Sign in' : 'Create account'}</button>
-      <p className="hint">Demo build. Credits are free play credits with no money value.</p>
+      <p className="hint">Demo build. Credits are free play credits with no money value. <PrivacyLink>How we handle your data</PrivacyLink></p>
     </form></div>
   );
 }
+
+const PrivacyLink = ({ children }) => <a href="/privacy.html" target="_blank" rel="noopener">{children}</a>;
 
 function CreateProfile({ onDone }) {
   const [f, setF] = useState({ handle: '', name: '', birth: '' });
@@ -162,7 +164,7 @@ function CreateProfile({ onDone }) {
         <input required maxLength={40} value={f.name} onChange={set('name')} /></label>
       <label className="field"><span className="label">Date of birth</span>
         <input type="date" required value={f.birth} onChange={set('birth')} /></label>
-      <p className="hint">yeah/nah is 18+ for now. Your date of birth is never shown to anyone.</p>
+      <p className="hint">yeah/nah is 18+ for now. Your date of birth is never shown to anyone. <PrivacyLink>Privacy notice</PrivacyLink></p>
       <Msg error={error} />
       <button className="solid">Start answering</button>
     </form></div>
@@ -762,7 +764,7 @@ function Profile({ d, reload }) {
 
       <div className="section"><h2>Your data</h2>
         <div className="panel">
-          <p className="hint">We never sell your answers. Brands only ever see totals for groups of 100+ people.</p>
+          <p className="hint">We never sell your answers. Brands only ever see totals for groups of 100+ people. <PrivacyLink>Privacy notice</PrivacyLink></p>
           <button className="ghost" onClick={download}>Download my data</button>
           <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
           <button className="ghost danger" onClick={del}>Delete my account</button>

@@ -137,3 +137,4 @@ details summary { cursor: pointer; margin: 6px 0; }
 .theme[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 .hint .linkbtn { font-size: inherit; color: inherit; }
 button.chip { border: 0; }
+.hint a { color: inherit; font-weight: 600; text-underline-offset: 3px; }

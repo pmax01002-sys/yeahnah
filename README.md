@@ -23,7 +23,8 @@ tests/     20 end-to-end checks of the rules, run through the same API the app u
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
 - **Suggest a question**, which waits for a moderator.
-- **Download my data** and **delete my account** (UK GDPR).
+- **Download my data** (everything held about you, as a file) and **delete my account** (UK GDPR).
+- **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
 
 All the numbers (5 a day, 3 credits, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code.
@@ -44,7 +45,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds both later updates (18+ and themes, then the privacy fixes) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds all three later updates (18+ and themes, the privacy fixes, the complete data download) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
