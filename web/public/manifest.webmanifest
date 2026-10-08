@@ -1,0 +1,9 @@
+{
+  "name": "yeah/nah",
+  "short_name": "yeah/nah",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F8FB",
+  "theme_color": "#151829",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

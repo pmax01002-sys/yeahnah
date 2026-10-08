@@ -1,0 +1,211 @@
+// End-to-end checks of the yeah/nah backend through the same API the app uses.
+//
+// Run against a fresh database (migration + seed) on a local Supabase or a
+// throwaway project with "Confirm email" turned off:
+//   SUPABASE_URL=... SUPABASE_ANON_KEY=... SUPABASE_SERVICE_KEY=... npm test
+// It creates test users. Never point it at a project with real people in it.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createClient } from '@supabase/supabase-js';
+
+const URL = process.env.SUPABASE_URL;
+const ANON = process.env.SUPABASE_ANON_KEY;
+const SERVICE = process.env.SUPABASE_SERVICE_KEY;
+const run = Date.now().toString(36);
+const opts = { auth: { persistSession: false, autoRefreshToken: false } };
+const admin = createClient(URL, SERVICE, opts);
+
+async function user(name, birth) {
+  const c = createClient(URL, ANON, opts);
+  const { error } = await c.auth.signUp({ email: `${name}.${run}@example.com`, password: 'demo-password-123' });
+  assert.ifError(error);
+  if (birth) await ok(c.rpc('create_profile', { p_handle: `${name}_${run}`, p_display_name: name, p_birth_date: birth }));
+  c.handle = `${name}_${run}`;
+  return c;
+}
+async function ok(p) { const { data, error } = await p; assert.ifError(error); return data; }
+async function fails(p, re) {
+  const { error } = await p;
+  assert.ok(error, 'expected an error');
+  if (re) assert.match(error.message, re);
+}
+const me = c => ok(c.rpc('my_profile'));
+const qid = async (c, text) => (await ok(c.from('questions').select('id').eq('text', text).single())).id;
+
+let alice, bob, tia, daily, others;
+
+test('setup: three people sign up', async () => {
+  alice = await user('alice', '1990-05-01');
+  bob = await user('bob', '1988-02-02');
+  tia = await user('tia', new Date(Date.now() - 15 * 365.25 * 864e5).toISOString().slice(0, 10));
+  const kid = await user('kid');
+  await fails(kid.rpc('create_profile', { p_handle: `kid_${run}`, p_display_name: 'kid', p_birth_date: '2020-01-01' }), /13 and over/);
+  await fails(kid.rpc('create_profile', { p_handle: alice.handle, p_display_name: 'x', p_birth_date: '1990-01-01' }), /taken/);
+  const p = await me(alice);
+  assert.equal(p.credits, 10);
+  assert.equal(p.is_adult, true);
+  assert.equal((await me(tia)).is_adult, false);
+});
+
+test('signed-out visitors see nothing', async () => {
+  const anon = createClient(URL, ANON, opts);
+  await fails(anon.from('questions').select('id'));
+  await fails(anon.from('statements').select('id'));
+});
+
+test('questions: today is the flat Earth, tomorrow stays hidden, under-18s never see sensitive ones', async () => {
+  const qs = await ok(alice.from('questions').select('id,text,daily_date,sensitivity,is_event'));
+  const today = qs.filter(q => q.daily_date && q.daily_date >= new Date(Date.now() - 864e5).toISOString().slice(0, 10));
+  daily = qs.find(q => q.text === 'Is the Earth flat?');
+  assert.ok(daily.daily_date, 'flat Earth is a daily question');
+  assert.ok(!qs.some(q => q.text === 'Is a hot dog a sandwich?'), "tomorrow's question is hidden");
+  assert.ok(today.length >= 1);
+  assert.ok(qs.some(q => q.sensitivity === 'sensitive'));
+  const tq = await ok(tia.from('questions').select('sensitivity'));
+  assert.ok(!tq.some(q => q.sensitivity === 'sensitive'));
+  others = qs.filter(q => !q.daily_date && !q.is_event && q.sensitivity === 'standard').map(q => q.id).sort((a, b) => a - b);
+});
+
+test('the crowd split only shows after you answer', async () => {
+  assert.equal(await ok(alice.rpc('question_split', { p_question: daily.id })), null);
+  const split = await ok(alice.rpc('answer', { p_question: daily.id, p_value: false }));
+  assert.deepEqual(split, { yes: 0, no: 1, total: 1 });
+  const s2 = await ok(bob.rpc('answer', { p_question: daily.id, p_value: true }));
+  assert.equal(s2.total, 2);
+});
+
+test('five answers a day, one always kept for the daily question', async () => {
+  // Alice has answered the daily question, so four more.
+  for (const id of others.slice(0, 4)) await ok(alice.rpc('answer', { p_question: id, p_value: true }));
+  assert.equal((await me(alice)).answers_left_today, 0);
+  await fails(alice.rpc('answer', { p_question: others[4], p_value: true }), /kept for the daily question/);
+  // Tia hasn't answered the daily question: she still only gets four others, then the daily one.
+  for (const id of others.slice(0, 4)) await ok(tia.rpc('answer', { p_question: id, p_value: true }));
+  await fails(tia.rpc('answer', { p_question: others[4], p_value: true }), /kept for the daily question/);
+  await ok(tia.rpc('answer', { p_question: daily.id, p_value: false }));
+});
+
+test('one change of mind a day, hidden from others for a week', async () => {
+  // Alice's answers start public, so Bob can see this one.
+  const before = await ok(bob.from('statements').select('value').eq('question_id', others[0]).eq('user_id', (await me(alice)).id));
+  assert.deepEqual(before, [{ value: true }]);
+  await ok(alice.rpc('answer', { p_question: others[0], p_value: false }));
+  await fails(alice.rpc('answer', { p_question: others[1], p_value: false }), /change of mind/);
+  const after = await ok(bob.from('statements').select('value').eq('question_id', others[0]).eq('user_id', (await me(alice)).id));
+  assert.deepEqual(after, [], 'changed answer hidden from Bob');
+  const own = await ok(alice.from('statements').select('value').eq('question_id', others[0]).is('superseded_at', null));
+  assert.deepEqual(own, [{ value: false }], 'Alice still sees her own');
+});
+
+test('visibility: friends-only needs a follow-back, private never shows, under-18s never public', async () => {
+  const aliceId = (await me(alice)).id;
+  await ok(alice.rpc('set_visibility', { p_question: others[1], p_visibility: 'friends' }));
+  await ok(alice.rpc('set_visibility', { p_question: others[2], p_visibility: 'private' }));
+  const see = async () => (await ok(bob.from('statements').select('question_id').eq('user_id', aliceId))).map(r => r.question_id);
+  assert.ok(!(await see()).includes(others[1]));
+  await ok(alice.from('follows').insert({ follower: aliceId, followed: (await me(bob)).id }));
+  await ok(bob.from('follows').insert({ follower: (await me(bob)).id, followed: aliceId }));
+  assert.ok((await see()).includes(others[1]), 'friends see friends-only answers');
+  assert.ok(!(await see()).includes(others[2]), 'private stays private');
+  // Tia is 15: her answers default to friends and can't be made public.
+  const t = await ok(tia.from('statements').select('visibility').eq('question_id', others[0]));
+  assert.deepEqual(t, [{ visibility: 'friends' }]);
+  await fails(tia.rpc('set_visibility', { p_question: others[0], p_visibility: 'public' }), /friends at most/);
+});
+
+test('people can only read their own birth date, and can only write through the app functions', async () => {
+  await fails(bob.from('profiles').select('birth_date'));
+  await ok(bob.from('profiles').select('handle,display_name'));
+  await fails(alice.from('statements').insert({ user_id: (await me(alice)).id, question_id: others[5], value: true, visibility: 'public' }));
+  await fails(alice.from('credit_ledger').insert({ user_id: (await me(alice)).id, amount: 1000, reason: 'cheat' }));
+  await fails(alice.from('statements').update({ value: true }).eq('question_id', daily.id));
+});
+
+test('sensitive questions need an 18+ opt-in and start private', async () => {
+  const god = await qid(alice, 'Do you believe in God?');
+  await fails(bob.rpc('answer', { p_question: god, p_value: true }), /Turn on sensitive/);
+  await fails(tia.rpc('set_sensitive_opt_in', { p_on: true }), /over-18s/);
+  await ok(bob.rpc('set_sensitive_opt_in', { p_on: true }));
+  await ok(bob.rpc('answer', { p_question: god, p_value: true, p_visibility: null }));
+  const s = await ok(bob.from('statements').select('visibility').eq('question_id', god));
+  assert.deepEqual(s, [{ visibility: 'private' }]);
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: god, p_minutes: 60 }), /Sensitive/);
+});
+
+test('sending a question costs 3 credits; answering in time earns 2 and skips the daily limit', async () => {
+  const q = others[6];
+  await fails(bob.rpc('send_challenge', { p_handle: tia.handle, p_question: q, p_minutes: 60 }), /friends/);
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 60 }), /yourself first/);
+  await ok(bob.rpc('answer', { p_question: q, p_value: true }));
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 5 }), /1 minute, 1 hour or 1 day/);
+  await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 60 }));
+  assert.equal((await me(bob)).credits, 7);
+  // Alice is out of answers today, but a friend's question still goes through.
+  await ok(alice.rpc('answer', { p_question: q, p_value: true }));
+  assert.equal((await me(alice)).credits, 12);
+  const ch = await ok(alice.from('challenges').select('answered_at'));
+  assert.ok(ch[0].answered_at);
+  // Her last visibility choice (private) carried over to this answer.
+  const v = await ok(alice.from('statements').select('visibility').eq('question_id', q).eq('user_id', (await me(alice)).id));
+  assert.deepEqual(v, [{ visibility: 'private' }]);
+  // Credits run out: 7 -> 4 -> 1, then refused.
+  await ok(bob.rpc('answer', { p_question: others[7], p_value: true }));
+  await ok(bob.rpc('answer', { p_question: others[8], p_value: true }));
+  await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[7], p_minutes: 1440 }));
+  await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 1 }));
+  assert.equal((await me(bob)).credits, 1);
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 3 credits/);
+});
+
+test('predictions are free and build a hit rate', async () => {
+  await ok(alice.rpc('predict', { p_kind: 'crowd', p_question: daily.id, p_yes: false }));
+  await fails(alice.rpc('predict', { p_kind: 'crowd', p_question: daily.id, p_yes: true }), /already/);
+  await fails(alice.rpc('predict', { p_kind: 'crowd', p_question: others[0], p_yes: true }), /today/);
+  assert.equal((await me(alice)).credits, 12, 'guessing costs nothing');
+
+  // Bob guesses Alice's answers; each resolves when she answers.
+  await ok(bob.rpc('predict', { p_kind: 'friend', p_question: others[7], p_yes: true, p_friend: alice.handle }));
+  await ok(bob.rpc('predict', { p_kind: 'friend', p_question: others[8], p_yes: true, p_friend: alice.handle }));
+  await fails(bob.rpc('predict', { p_kind: 'friend', p_question: others[9], p_yes: true, p_friend: tia.handle }), /friends/);
+  await fails(bob.rpc('predict', { p_kind: 'friend', p_question: others[6], p_yes: true, p_friend: alice.handle }), /already answered/);
+  await ok(alice.rpc('answer', { p_question: others[7], p_value: true }));                          // private: guess is void
+  await ok(alice.rpc('answer', { p_question: others[8], p_value: true, p_visibility: 'friends' })); // guess was right
+  assert.deepEqual((await me(bob)).predictions, { made: 2, resolved: 1, correct: 1, rate: 100 });
+
+  // World event, settled by an editor.
+  const ev = await qid(alice, 'Will it snow in London on Christmas Day 2026?');
+  await ok(alice.rpc('predict', { p_kind: 'event', p_question: ev, p_yes: true }));
+  await fails(alice.rpc('resolve_event', { p_question: ev, p_outcome: false }));
+  await ok(admin.rpc('resolve_event', { p_question: ev, p_outcome: false }));
+  await fails(alice.rpc('predict', { p_kind: 'event', p_question: ev, p_yes: true }), /closed/);
+
+  // Crowd guess: move today's question to an old date, then resolve. NAH leads 2-1.
+  const real = daily.daily_date;
+  await ok(admin.from('questions').update({ daily_date: '2000-01-01' }).eq('id', daily.id));
+  assert.ok((await ok(admin.rpc('resolve_due'))) >= 1);
+  await ok(admin.from('questions').update({ daily_date: real }).eq('id', daily.id));
+
+  assert.deepEqual((await me(alice)).predictions, { made: 2, resolved: 2, correct: 1, rate: 50 });
+  const card = await ok(bob.rpc('profile_card', { p_handle: alice.handle }));
+  assert.equal(card.predictions.rate, 50);
+  assert.equal(card.is_friend, true);
+});
+
+test('partner apps write verified answers from the server only', async () => {
+  const fivek = await qid(alice, 'Can you run 5k?');
+  const aliceId = (await me(alice)).id;
+  await fails(alice.rpc('partner_write', { p_user: aliceId, p_question: fivek, p_value: true, p_source: 'strava' }));
+  await ok(admin.rpc('partner_write', { p_user: aliceId, p_question: fivek, p_value: true, p_source: 'strava' }));
+  const s = await ok(alice.from('statements').select('value,source,verified').eq('question_id', fivek));
+  assert.deepEqual(s, [{ value: true, source: 'strava', verified: true }]);
+});
+
+test('download my data and delete my account', async () => {
+  const data = await ok(alice.rpc('export_my_data'));
+  assert.equal(data.profile.handle, alice.handle);
+  assert.ok(data.statements.length >= 5);
+  await ok(tia.rpc('delete_my_account'));
+  const gone = await ok(admin.from('profiles').select('id').eq('handle', tia.handle));
+  assert.deepEqual(gone, []);
+});

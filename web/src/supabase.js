@@ -1,0 +1,15 @@
+import { createClient } from '@supabase/supabase-js';
+
+const url = import.meta.env.VITE_SUPABASE_URL;
+const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+export const configured = Boolean(url && key);
+export const supabase = configured ? createClient(url, key) : null;
+
+// Calls a database function and throws its message ("You have used today's
+// change of mind") so screens can show it as-is.
+export async function call(fn, args) {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) throw new Error(error.message);
+  return data;
+}
