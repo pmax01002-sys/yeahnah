@@ -209,3 +209,68 @@ test('download my data and delete my account', async () => {
   const gone = await ok(admin.from('profiles').select('id').eq('handle', tia.handle));
   assert.deepEqual(gone, []);
 });
+
+test('friend groups: invite link, everyone becomes friends, answers per question after you answer', async () => {
+  const host = await user('host', '1991-01-01');
+  const g1 = await user('gina', '1993-03-03');
+  const g2 = await user('gus', '1994-04-04');
+  const teen = await user('teen', new Date(Date.now() - 16 * 365.25 * 864e5).toISOString().slice(0, 10));
+  const anon = createClient(URL, ANON, opts);
+
+  const g = await ok(host.rpc('create_group', { p_name: 'Pub quiz lot' }));
+  assert.equal(g.name, 'Pub quiz lot');
+  const preview = await ok(anon.rpc('group_preview', { p_code: g.invite_code }));
+  assert.deepEqual(preview, { name: 'Pub quiz lot', members: 1, invited_by: 'host' });
+  await fails(anon.rpc('group_board', { p_group: g.id }));
+  await fails(g1.rpc('join_group', { p_code: 'nope' }), /doesn't work/);
+  await fails(teen.rpc('join_group', { p_code: g.invite_code }), /over-18s/);
+  await ok(g1.rpc('join_group', { p_code: g.invite_code }));
+  await ok(g2.rpc('join_group', { p_code: g.invite_code }));
+  await ok(g2.rpc('join_group', { p_code: g.invite_code })); // joining twice is harmless
+
+  // Everyone is now friends with everyone.
+  assert.equal((await ok(g1.rpc('profile_card', { p_handle: g2.handle }))).is_friend, true);
+  assert.equal((await ok(host.rpc('profile_card', { p_handle: g1.handle }))).is_friend, true);
+  const members = await ok(g1.from('group_members').select('user_id').eq('group_id', g.id));
+  assert.equal(members.length, 3);
+  // Outsiders can't see the group.
+  assert.deepEqual(await ok(alice.from('groups').select('id').eq('id', g.id)), []);
+  await fails(alice.rpc('group_board', { p_group: g.id }), /not in that group/);
+
+  // Board: Gina and Gus answer; the host hasn't, so sees counts only.
+  await ok(g1.rpc('answer', { p_question: daily.id, p_value: true }));
+  await ok(g2.rpc('answer', { p_question: daily.id, p_value: false, p_visibility: 'friends' }));
+  let board = await ok(host.rpc('group_board', { p_group: g.id }));
+  let row = board.find(r => r.question_id === daily.id);
+  assert.equal(row.answered, 2);
+  assert.equal(row.answers, null, 'no peeking before you answer');
+  await ok(host.rpc('answer', { p_question: daily.id, p_value: false }));
+  board = await ok(host.rpc('group_board', { p_group: g.id }));
+  row = board.find(r => r.question_id === daily.id);
+  assert.deepEqual(row.answers.map(a => [a.name, a.value, a.me]),
+    [['host', false, true], ['gina', true, false], ['gus', false, false]]);
+
+  // Private answers stay out of the board.
+  await ok(g2.rpc('set_visibility', { p_question: daily.id, p_visibility: 'private' }));
+  row = (await ok(host.rpc('group_board', { p_group: g.id }))).find(r => r.question_id === daily.id);
+  assert.deepEqual(row.answers.map(a => a.name), ['host', 'gina']);
+
+  // Only the creator can reset the link; the old one stops working.
+  await fails(g1.rpc('reset_invite', { p_group: g.id }), /Only the person/);
+  const code = await ok(host.rpc('reset_invite', { p_group: g.id }));
+  assert.notEqual(code, g.invite_code);
+  assert.equal(await ok(anon.rpc('group_preview', { p_code: g.invite_code })), null);
+
+  // Leaving removes you from the board.
+  await ok(g2.rpc('leave_group', { p_group: g.id }));
+  await fails(g2.rpc('group_board', { p_group: g.id }), /not in that group/);
+});
+
+test('feedback lands in a table only its author (and the owner) can read', async () => {
+  await ok(bob.rpc('submit_feedback', { p_body: 'Love the flat Earth one', p_context: 'today' }));
+  await fails(bob.from('feedback').insert({ body: 'x' }));
+  assert.equal((await ok(bob.from('feedback').select('body'))).length, 1);
+  assert.equal((await ok(alice.from('feedback').select('body'))).length, 0);
+  const all = await ok(admin.from('feedback').select('body,context'));
+  assert.deepEqual(all, [{ body: 'Love the flat Earth one', context: 'today' }]);
+});

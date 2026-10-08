@@ -12,6 +12,41 @@ const SENS = { standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive
 const TIMERS = [[1, '1 min'], [60, '1 hour'], [1440, '1 day']];
 const todayUK = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
+// An invite link (?join=CODE) is remembered until the person has a profile,
+// so it survives signing up. Storage can be blocked, so keep a copy in memory.
+const JOIN_KEY = 'yeahnah-join';
+let inviteCode = null;
+function pendingInvite() {
+  const fromUrl = new URLSearchParams(window.location.search).get('join');
+  if (fromUrl) {
+    inviteCode = fromUrl;
+    try { localStorage.setItem(JOIN_KEY, fromUrl); } catch { /* memory copy is enough */ }
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  if (!inviteCode) try { inviteCode = localStorage.getItem(JOIN_KEY); } catch { /* none */ }
+  return inviteCode;
+}
+function clearInvite() {
+  inviteCode = null;
+  try { localStorage.removeItem(JOIN_KEY); } catch { /* none */ }
+}
+pendingInvite();
+
+function InviteBanner() {
+  const [g, setG] = useState(null);
+  useEffect(() => {
+    const code = pendingInvite();
+    if (code) call('group_preview', { p_code: code }).then(setG).catch(() => {});
+  }, []);
+  if (!g) return null;
+  return (
+    <div className="hook">
+      {g.invited_by ? `${g.invited_by} invited you` : 'You\'re invited'} to join <b>{g.name}</b>
+      {g.members > 1 && ` with ${g.members - 1} other${g.members === 2 ? '' : 's'}`}. Sign up and you'll see how each other answered.
+    </div>
+  );
+}
+
 function useNow(ms) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
@@ -68,7 +103,7 @@ export default function App() {
 }
 
 function SignIn() {
-  const [mode, setMode] = useState('signin');
+  const [mode, setMode] = useState(pendingInvite() ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -89,6 +124,7 @@ function SignIn() {
     <div className="app"><form className="screen center" onSubmit={submit}>
       <div className="big-brand"><span>yeah</span>/<em>nah</em></div>
       <p className="hint">One yes/no question a day. Your answers build your profile.</p>
+      <InviteBanner />
       <div className="seg" role="group" aria-label="Sign in or sign up">
         <button type="button" aria-pressed={mode === 'signin'} onClick={() => setMode('signin')}>Sign in</button>
         <button type="button" aria-pressed={mode === 'signup'} onClick={() => setMode('signup')}>New here</button>
@@ -119,6 +155,7 @@ function CreateProfile({ onDone }) {
   return (
     <div className="app"><form className="screen center" onSubmit={submit}>
       <h1>Make your profile</h1>
+      <InviteBanner />
       <label className="field"><span className="label">Handle</span>
         <input required pattern="[A-Za-z0-9_]{3,20}" placeholder="max_01" value={f.handle} onChange={set('handle')} /></label>
       <label className="field"><span className="label">Name people see</span>
@@ -138,17 +175,22 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
       supabase.from('challenges').select('*').order('created_at', { ascending: false }),
       supabase.from('predictions').select('*').order('created_at', { ascending: false }),
+      supabase.from('groups').select('id,name,invite_code,created_by').order('created_at'),
+      supabase.from('group_members').select('group_id,user_id').order('joined_at'),
     ]);
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
     challenges.data.forEach(c => { ids.add(c.from_user); ids.add(c.to_user); });
     predictions.data.forEach(p => p.target_user && ids.add(p.target_user));
+    // Groups need the 2026-10-09 database update; until it runs, show none.
+    const groupRows = groups.data || [], memberRows = members.data || [];
+    memberRows.forEach(m => ids.add(m.user_id));
     const { data: people } = ids.size
       ? await supabase.from('profiles').select('id,handle,display_name').in('id', [...ids])
       : { data: [] };
@@ -164,6 +206,7 @@ function useData() {
       friends: [...iFollow].filter(id => followsMe.has(id)).map(id => person[id]),
       challenges: challenges.data,
       predictions: predictions.data,
+      groups: groupRows.map(g => ({ ...g, members: memberRows.filter(m => m.group_id === g.id).map(m => m.user_id) })),
     });
   }, []);
   useEffect(() => { reload(); }, [reload]);
@@ -174,14 +217,28 @@ function Signed() {
   const [d, reload] = useData();
   const [tab, setTab] = useState('today');
   const [sheet, setSheet] = useState(null);
+  const [feedback, setFeedback] = useState(false);
+  const [toast, setToast] = useState('');
   const now = useNow(1000);
+  const meId = d && d.me && d.me.id;
+
+  // Join the group from an invite link once the profile exists.
+  useEffect(() => {
+    const code = meId && pendingInvite();
+    if (!code) return;
+    clearInvite();
+    call('join_group', { p_code: code })
+      .then(g => { setToast(`You joined ${g.name}. Answer a question to see how everyone answered.`); setTab('friends'); return reload(); })
+      .catch(e => setToast(e.message));
+  }, [meId]);
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 7000); return () => clearTimeout(t); } }, [toast]);
 
   if (!d) return <div className="app" />;
   if (!d.me) return <CreateProfile onDone={reload} />;
 
   const inbox = d.challenges.filter(c => c.to_user === d.me.id && !c.answered_at && new Date(c.expires_at) > now);
   const ctx = { d, reload, open: setSheet, now, inbox };
-  const TABS = [['today', '☀️', 'Today'], ['questions', '📋', 'Questions'], ['predict', '🔮', 'Predict'], ['friends', '👥', 'Friends'], ['profile', '🙂', 'Profile']];
+  const TABS = [['today', '☀️', 'Today'], ['questions', '📋', 'Questions'], ['predict', '🔮', 'Predict'], ['friends', '👥', 'Group'], ['profile', '🙂', 'Profile']];
 
   return (
     <div className="app">
@@ -190,8 +247,10 @@ function Signed() {
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
           <span className="pill credits" title="Free play credits">{d.me.credits} cr</span>
+          <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
+      {toast && <div className="note toast" role="status" onClick={() => setToast('')}>{toast}</div>}
       <main className="screen" key={tab}>
         {tab === 'today' && <Today {...ctx} />}
         {tab === 'questions' && <Questions {...ctx} />}
@@ -207,6 +266,7 @@ function Signed() {
           </button>
         ))}
       </nav>
+      {feedback && <FeedbackSheet tab={tab} onClose={() => setFeedback(false)} />}
       {sheet && (
         <div className="scrim" onClick={e => e.target === e.currentTarget && setSheet(null)}>
           <div className="sheet" role="dialog" aria-modal="true">
@@ -534,6 +594,8 @@ function Friends({ d, reload, open, now, inbox }) {
 
   return (
     <>
+      <Groups d={d} reload={reload} open={open} />
+      <div className="section"><h2>Add someone by handle</h2></div>
       <form className="inline" onSubmit={find} style={{ marginTop: 6 }}>
         <input placeholder="Find someone by @handle" value={handle} onChange={e => setHandle(e.target.value)} aria-label="Handle" />
         <button className="ghost">Find</button>
@@ -676,5 +738,130 @@ function Profile({ d, reload }) {
         </div>
       </div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Friend groups: an invite link, and everyone's answers per question
+// ---------------------------------------------------------------------------
+
+function Groups({ d, reload, open }) {
+  const [sel, setSel] = useState(null);
+  const [name, setName] = useState('');
+  const [board, setBoard] = useState(null);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const g = d.groups.find(x => x.id === sel) || d.groups[0];
+
+  useEffect(() => {
+    if (!g) return;
+    call('group_board', { p_group: g.id }).then(setBoard).catch(e => setError(e.message));
+  }, [g && g.id, d]);
+
+  async function act(fn, args, done) {
+    setError(''); setNote('');
+    try { const r = await call(fn, args); if (done) setNote(done); await reload(); return r; } catch (e) { setError(e.message); }
+  }
+  async function create(e) {
+    e.preventDefault();
+    const r = await act('create_group', { p_name: name }, 'Group made. Now share the invite.');
+    if (r) { setName(''); setSel(r.id); }
+  }
+  async function share() {
+    const link = `${window.location.origin}/?join=${g.invite_code}`;
+    const text = `Join my yeah/nah group "${g.name}". One yes/no question a day, and we see how each other answered. It's an early test, so tap Feedback and tell me what you think.`;
+    setError(''); setNote('');
+    if (navigator.share) {
+      try { await navigator.share({ title: 'yeah/nah', text, url: link }); return; } catch (err) { if (err.name === 'AbortError') return; }
+    }
+    try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text.'); }
+    catch { setNote(`Send your friends this link: ${link}`); }
+  }
+
+  const makeForm = d.me.is_adult && (
+    <form className="inline" onSubmit={create}>
+      <input required maxLength={40} placeholder="Group name, e.g. Pub quiz lot" value={name} onChange={e => setName(e.target.value)} aria-label="Group name" />
+      <button className="ghost">Make</button>
+    </form>
+  );
+
+  if (!g) {
+    return (
+      <div className="section"><h2>Your group</h2>
+        <p className="hint">{d.me.is_adult
+          ? 'Make a group and share the invite link. Everyone who joins sees how each other answered every question, once they have answered it too.'
+          : 'Groups are for over-18s in this test version.'}</p>
+        {makeForm}
+        <Msg error={error} note={note} />
+      </div>
+    );
+  }
+
+  const rows = (board || []).filter(r => d.byId[r.question_id]);
+  const people = g.members.map(id => d.person[id]).filter(Boolean);
+  return (
+    <div className="section">
+      {d.groups.length > 1 && (
+        <div className="filters" role="group" aria-label="Group">
+          {d.groups.map(x => <button key={x.id} aria-pressed={x.id === g.id} onClick={() => setSel(x.id)}>{x.name}</button>)}
+        </div>
+      )}
+      <h2>{g.name}</h2>
+      <div className="chips">{people.map(p => <span key={p.id} className="chip">{p.id === d.me.id ? 'You' : p.display_name}</span>)}</div>
+      <button className="solid" onClick={share}>Invite friends</button>
+      <Msg error={error} note={note} />
+
+      <h3 style={{ marginTop: 8 }}>How everyone answered</h3>
+      {board === null && <p className="empty">Loading…</p>}
+      {board && rows.length === 0 && <p className="empty">No answers yet. Start with today's question.</p>}
+      <div className="rows">
+        {rows.map(r => {
+          const q = d.byId[r.question_id];
+          return (
+            <button key={r.question_id} className="row" onClick={() => open(q.id)}>
+              <span>
+                <span className="t">{q.text}</span>
+                {r.answers
+                  ? <span className="chips">{r.answers.map(a => (
+                      <span key={a.handle} className={`vpill ${pillClass(q, a.value)}`}>{a.me ? 'You' : a.name}: {word(q, a.value)}</span>))}</span>
+                  : <span className="hint">{r.answered} of {people.length} answered. Answer it to see who said what.</span>}
+              </span>
+              <span>{r.answers ? '' : '🔒'}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="inline" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        {g.created_by === d.me.id
+          ? <button className="linkbtn" onClick={() => act('reset_invite', { p_group: g.id }, 'New invite link made. The old one no longer works.')}>Reset invite link</button>
+          : <span />}
+        <button className="linkbtn danger" onClick={() => window.confirm(`Leave ${g.name}?`) && act('leave_group', { p_group: g.id })}>Leave group</button>
+      </div>
+      {d.me.is_adult && d.groups.length < 5 && <details><summary className="hint">Make another group</summary>{makeForm}</details>}
+    </div>
+  );
+}
+
+function FeedbackSheet({ tab, onClose }) {
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+  async function submit(e) {
+    e.preventDefault(); setError('');
+    try { await call('submit_feedback', { p_body: text, p_context: tab }); setSent(true); setText(''); }
+    catch (err) { setError(err.message); }
+  }
+  return (
+    <div className="scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+      <form className="sheet" role="dialog" aria-modal="true" aria-label="Feedback" onSubmit={submit}>
+        <div className="sheet-top"><button type="button" className="close" onClick={onClose}>Close</button></div>
+        <h2>What do you think so far?</h2>
+        <p className="hint">Anything goes: what's confusing, what's fun, questions you'd love to see, bugs. Only the yeah/nah team reads this.</p>
+        <label className="field"><span className="label">Your feedback</span>
+          <textarea required minLength={2} maxLength={2000} rows={6} value={text} onChange={e => setText(e.target.value)} /></label>
+        <Msg error={error} note={sent && 'Thanks, got it. Send more any time.'} />
+        <button className="solid">Send feedback</button>
+      </form>
+    </div>
   );
 }
