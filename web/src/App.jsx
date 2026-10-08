@@ -638,8 +638,9 @@ function Friends({ d, reload, open, now, inbox }) {
           {card.i_follow
             ? <button className="ghost" onClick={() => follow(cardId, false)}>Unfollow</button>
             : <button className="solid" onClick={async () => {
-                const { data } = await supabase.from('profiles').select('id').eq('handle', card.handle).single();
-                follow(data.id, true);
+                // Cards carry the id since the 2026-10-11 database update; before it, look it up.
+                const id = card.id || (await supabase.from('profiles').select('id').eq('handle', card.handle).single()).data?.id;
+                follow(id, true);
               }}>{card.follows_me ? 'Follow back' : 'Follow'}</button>}
         </div>
       )}
@@ -804,7 +805,7 @@ function Groups({ d, reload, open }) {
     if (navigator.share) {
       try { await navigator.share({ title: 'yeah/nah', text, url: link }); return; } catch (err) { if (err.name === 'AbortError') return; }
     }
-    try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text.'); }
+    try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text. Anyone with the link can join, so only send it to friends.'); }
     catch { setNote(`Send your friends this link: ${link}`); }
   }
 
@@ -865,8 +866,18 @@ function Groups({ d, reload, open }) {
         {g.created_by === d.me.id
           ? <button className="linkbtn" onClick={() => act('reset_invite', { p_group: g.id }, 'New invite link made. The old one no longer works.')}>Reset invite link</button>
           : <span />}
-        <button className="linkbtn danger" onClick={() => window.confirm(`Leave ${g.name}?`) && act('leave_group', { p_group: g.id })}>Leave group</button>
+        <button className="linkbtn danger" onClick={() => window.confirm(`Leave ${g.name}? You stop being friends with people you only know through it.`) && act('leave_group', { p_group: g.id })}>Leave group</button>
       </div>
+      {g.created_by === d.me.id && people.length > 1 && (
+        <details><summary className="hint">Remove someone</summary>
+          <div className="chips" style={{ marginTop: 8 }}>
+            {people.filter(p => p.id !== d.me.id).map(p => (
+              <button key={p.id} className="chip" onClick={() => window.confirm(`Remove ${p.display_name} from ${g.name}? They won't be able to rejoin with the invite link.`)
+                && act('remove_member', { p_group: g.id, p_user: p.id }, `${p.display_name} was removed.`)}>{p.display_name} ✕</button>
+            ))}
+          </div>
+        </details>
+      )}
       {d.me.is_adult && d.groups.length < 5 && <details><summary className="hint">Make another group</summary>{makeForm}</details>}
     </div>
   );

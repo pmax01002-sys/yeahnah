@@ -6,7 +6,7 @@ prototype's rules enforced on the server. It runs on free tiers.
 ```
 web/       the app people use (React, built to a static site)
 supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     17 end-to-end checks of the rules, run through the same API the app uses
+tests/     20 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
@@ -15,10 +15,11 @@ tests/     17 end-to-end checks of the rules, run through the same API the app u
 - **Today**: the daily question ("Is the Earth flat?" on launch day). The crowd split and friends' answers appear only after you answer.
 - **Themes**: 139 questions in 20 themes, including Sport, Music, Film & TV, Travel, Work, Dating, Food, Mysteries, Future, Nostalgia and Brands. The Questions tab shows each theme with how many you've answered; tap one to see just those. Picks like "Messi or Ronaldo?" show both names as the answer buttons.
 - **5 answers a day**, one always kept for the daily question. **One change of mind a day**, and the changed answer is hidden from others for 7 days.
-- **Who sees each answer**: public, friends or private. Your last choice carries over, except sensitive answers, which always start private. Under-18s can never be public.
+- **Who sees each answer**: public, friends or private. Your last choice carries over, except sensitive answers, which always start private. Before you pick one, standard answers start public; set `new_answers_public` to 0 in `app_config` to start them friends-only. Under-18s can never be public.
 - **Sensitive questions** (religion, politics) need an 18+ opt-in, which is recorded as consent and can be withdrawn.
 - **Friends** are people who follow each other. Send a friend a question for 3 credits with a 1 minute, 1 hour or 1 day timer; they earn 2 credits for answering in time, and it doesn't use up their daily 5. Everyone starts with 10 credits.
-- **Friend groups**: make a group, tap Invite friends and send the link. Whoever signs up through it joins the group and becomes friends with everyone in it. The Group tab shows, per question, how each member answered, once you've answered it yourself. Private answers stay hidden. Groups are 18+ in the demo.
+- **Friend groups**: make a group, tap Invite friends and send the link. Whoever signs up through it joins the group and becomes friends with everyone in it. The Group tab shows, per question, how each member answered, once you've answered it yourself. Private answers stay hidden. Groups are 18+ in the demo. Anyone with the invite link can join, so it's for sending to friends. Leaving a group ends the friendships it made, and whoever made the group can remove someone, who then can't rejoin with the link.
+- **Finding people**: you can only see the profiles of people you're connected to (friends, followers, your groups). To add someone new, type their exact handle.
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
 - **Suggest a question**, which waits for a moderator.
@@ -43,7 +44,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. For example, if you ran `setup-all.sql` before friend groups existed, run `supabase/migrations/20261009000000_groups.sql`, then `supabase/migrations/20261010000000_adults_only_and_themes.sql`. Each file is safe to run once; the themes one is also safe to run twice.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds both later updates (18+ and themes, then the privacy fixes) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
