@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">yeah/nah</string>
+    <string name="title_activity_main">yeah/nah</string>
+    <string name="package_name">app.yeahnah</string>
+    <string name="custom_url_scheme">app.yeahnah</string>
+</resources>

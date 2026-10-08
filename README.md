@@ -95,3 +95,20 @@ join group_members m on m.group_id = g.id join profiles p on p.id = m.user_id or
 ## Not in the demo yet
 
 Push notifications, magic-link and Google/Apple sign-in, age estimation, device checks against vote stuffing, a moderator screen, the real Strava connection, and anything with real money. The real-money side stays in a separate, licensed system and never shares this database.
+
+## Phone apps (iPhone and Android)
+
+The same app is wrapped for iPhone and Android with [Capacitor](https://capacitorjs.com). The native projects are `web/ios` and `web/android`; `web/capacitor.config.json` holds the app id (`app.yeahnah`) and name.
+
+GitHub Actions (`.github/workflows/mobile.yml`) builds both on every change to `web/`:
+
+- **Android**: a debug APK under the run's **Artifacts**. Download it on an Android phone and open it to install (allow installs from your browser when asked).
+- **iPhone**: a simulator build, which checks the Xcode project compiles. Putting it on real iPhones needs TestFlight, below.
+
+Set these under **Settings > Secrets and variables > Actions > Variables** so the apps reach the same database as the website: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_SITE_URL` (the website address, used in invite links).
+
+**TestFlight**: join the Apple Developer Program, create the app in App Store Connect with bundle id `app.yeahnah`, make an App Store Connect API key (Users and Access > Integrations, App Manager role) and add these repository secrets: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the .p8 file's text) and `APPLE_TEAM_ID`. Then run the workflow by hand with **release** ticked.
+
+**Google Play**: make an upload keystore (`keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`), add `ANDROID_KEYSTORE_BASE64` (`base64 -w0 upload.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` as secrets, and run the workflow with **release** ticked. Upload the signed `.aab` from the run's Artifacts to the Play Console's internal testing track.
+
+To change the app icon or splash screen, replace the images in `web/assets` and run `npx @capacitor/assets generate --iconBackgroundColor '#151829' --splashBackgroundColor '#151829'` in `web/`, then put back `web/public` (the tool also rewrites the website's icons).

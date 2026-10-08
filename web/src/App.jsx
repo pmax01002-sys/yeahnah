@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
+import { siteUrl, shareLink, onInviteOpened } from './native.js';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -31,6 +32,12 @@ function clearInvite() {
   try { localStorage.removeItem(JOIN_KEY); } catch { /* none */ }
 }
 pendingInvite();
+// In the phone apps an invite link arrives as an event rather than the page
+// address: remember it and restart, so it is handled like the website's.
+onInviteOpened(code => {
+  try { localStorage.setItem(JOIN_KEY, code); } catch { /* none */ }
+  window.location.reload();
+});
 
 function InviteBanner() {
   const [g, setG] = useState(null);
@@ -114,7 +121,8 @@ function SignIn() {
     e.preventDefault();
     setBusy(true); setError(''); setNote('');
     const fn = mode === 'signin' ? 'signInWithPassword' : 'signUp';
-    const { data, error } = await supabase.auth[fn]({ email, password });
+    const options = mode === 'signup' && siteUrl ? { emailRedirectTo: siteUrl } : undefined;
+    const { data, error } = await supabase.auth[fn]({ email, password, options });
     setBusy(false);
     if (error) return setError(error.message);
     if (mode === 'signup' && !data.session) setNote('Check your email to confirm, then sign in.');
@@ -798,12 +806,11 @@ function Groups({ d, reload, open }) {
     if (r) { setName(''); setSel(r.id); }
   }
   async function share() {
-    const link = `${window.location.origin}/?join=${g.invite_code}`;
+    const link = `${siteUrl}/?join=${g.invite_code}`;
     const text = `Join my yeah/nah group "${g.name}". One yes/no question a day, and we see how each other answered. It's an early test, so tap Feedback and tell me what you think.`;
     setError(''); setNote('');
-    if (navigator.share) {
-      try { await navigator.share({ title: 'yeah/nah', text, url: link }); return; } catch (err) { if (err.name === 'AbortError') return; }
-    }
+    try { if (await shareLink({ title: 'yeah/nah', text, url: link })) return; }
+    catch (err) { if (err.name === 'AbortError' || /cancel/i.test(err.message)) return; }
     try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text.'); }
     catch { setNote(`Send your friends this link: ${link}`); }
   }
