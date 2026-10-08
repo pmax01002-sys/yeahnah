@@ -14,7 +14,7 @@ name: Mobile apps
 
 on:
   push:
-    branches: [main, 'claude/ios-build-plan-*']
+    branches: [main]
     paths: ['web/**', '.github/workflows/mobile.yml']
   pull_request:
     paths: ['web/**', '.github/workflows/mobile.yml']
