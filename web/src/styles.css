@@ -42,6 +42,7 @@
 html, body, #root { height: 100%; }
 body {
   margin: 0; color: var(--ink); font: 14px/1.5 var(--body); -webkit-font-smoothing: none;
+  font-variant-ligatures: no-common-ligatures;  /* Pixelify joins fi and fl into one glyph that reads as A: "Profile" showed as "ProAle" */
   background-color: var(--desk);
   background-image: radial-gradient(circle at 1px 1px, var(--dot) 0.9px, transparent 1.1px);
   background-size: 4px 4px;
