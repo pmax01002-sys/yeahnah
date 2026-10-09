@@ -716,8 +716,16 @@ function Today(ctx) {
   const size = d.cfg.answers_per_day || 5;
   const daily = d.questions.find(q => q.daily_date === today);
   const inboxIds = [...new Set(inbox.map(c => c.question_id))];
-  // Five cards a day: today's question first, then four you haven't answered,
-  // in a shuffled order. Questions friends send you are extra cards on top.
+  // Everything you answered today stays in the stack, wherever you answered it,
+  // so the stack is the same on every device.
+  const answeredToday = Object.values(d.mine)
+    .filter(st => st.source === 'app' && d.byId[st.question_id]
+      && new Date(st.created_at).toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) === today)
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+    .map(st => st.question_id);
+  // Five cards a day: today's question first, then what you've answered today,
+  // then enough you haven't answered to make five, in a shuffled order.
+  // Questions friends send you are extra cards on top.
   const [hand, setHand] = useState(() => {
     const kept = loadHand(uid, today);
     if (kept && Array.isArray(kept.ids)) {
@@ -725,9 +733,20 @@ function Today(ctx) {
       return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids };
     }
     const first = daily ? [daily.id] : [];
-    const ids = [...first, ...dealable(d, today, new Set([...first, ...inboxIds])).slice(0, size - first.length)];
-    return { ids, i: 0, seen: ids };
+    const done = answeredToday.filter(id => !first.includes(id));
+    // Enough to make five, or as many answers as you have left today if that's more.
+    const left = daily ? d.me.other_answers_left_today : d.me.answers_left_today;
+    const fresh = dealable(d, today, new Set([...first, ...done, ...inboxIds])).slice(0, Math.max(size - first.length - done.length, left, 0));
+    const ids = [...first, ...done, ...fresh];
+    return { ids, i: Math.max(ids.findIndex(id => !d.mine[id]), 0), seen: ids };
   });
+  // Something answered outside the stack today (in Questions, or on another device) joins it at the end.
+  useEffect(() => {
+    setHand(h => {
+      const missing = answeredToday.filter(id => !h.ids.includes(id));
+      return missing.length ? { ...h, ids: [...h.ids, ...missing], seen: [...new Set([...h.seen, ...missing])] } : h;
+    });
+  }, [answeredToday.join()]);
   // A friend's question is shuffled into the next few cards, including ones that arrive while you're here.
   useEffect(() => {
     setHand(h => {
@@ -785,9 +804,9 @@ function Today(ctx) {
     if (k === hand.i) return;
     setNote(''); motion.dir(k < hand.i ? 1 : -1); setHand(h => ({ ...h, i: k }));
   }
-  // Shuffle swaps every unanswered card for one you haven't seen today, friends'
-  // questions first, keeping answered cards, today's question, questions friends
-  // sent and starred ones.
+  // Shuffle only ever swaps unanswered cards, for ones you haven't seen today,
+  // friends' questions first. Answered cards stay, and so do today's question,
+  // questions friends sent and starred ones until you answer them.
   function reshuffle() {
     const fresh = dealable(d, today, new Set([...hand.ids, ...hand.seen]));
     const pool = fresh.length >= swappable.length ? fresh
