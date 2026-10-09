@@ -219,7 +219,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -230,6 +230,7 @@ function useData() {
       supabase.from('app_config').select('key,value'),
       supabase.from('stars').select('question_id'),
       supabase.from('credit_ledger').select('id').eq('reason', 'future_unlock').limit(1),
+      call('todays_powerup').catch(() => null),
     ]);
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
@@ -256,6 +257,7 @@ function useData() {
       challenges: challenges.data,
       predictions: predictions.data,
       futureUnlocked: (unlock.data || []).length > 0,
+      powerup,
       groups: groupRows.map(g => ({ ...g, members: memberRows.filter(m => m.group_id === g.id).map(m => m.user_id) })),
     });
   }, []);
@@ -693,6 +695,48 @@ function dealable(d, today, skip) {
   return [0, 1, 2].flatMap(r => qs.filter(q => rank(q) === r).map(q => q.id));
 }
 
+// Power-ups: some days the first hand has one in it. For now each one holds
+// slashes to claim; rarer ones hold more. It's a card in the hand like any
+// other, under the id PU, and stays there once claimed.
+const PU = 'powerup';
+const RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+function PowerUpCard({ p, reload }) {
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const level = RARITY.indexOf(p.rarity) + 1;
+  const unit = p.slashes === 1 ? 'slash' : 'slashes';
+  async function claim() {
+    setError(''); setBusy(true);
+    try { await call('claim_powerup'); await reload(); } catch (e) { setError(e.message); }
+    setBusy(false);
+  }
+  return (
+    <div className={`card deck-card powerup ${p.rarity}${p.claimed ? ' claimed' : ''}`}>
+      <div className="chips">
+        <span className="chip rarity">{p.rarity}</span>
+        <span className="pips" role="img" aria-label={`Rarity ${level} of 5`}>
+          {RARITY.map((r, k) => <i key={r} className={k < level ? 'on' : ''} />)}
+        </span>
+        <span className="chip">Power-up</span>
+      </div>
+      <div className="pu-art" aria-hidden="true">
+        <span className="n">+{p.slashes}</span>
+        <span className="w">{unit}</span>
+      </div>
+      <h2 className="qtext">{p.name}</h2>
+      <p className="hint">{p.blurb}</p>
+      {p.claimed
+        ? <p className="pu-done"><Px name="check" /> Claimed. {p.slashes} {unit} added.</p>
+        : <button className="solid pu-claim" onClick={claim} disabled={busy}>Claim {p.slashes} {unit}</button>}
+      <p className="hint">
+        {p.odds ? `${p.odds}% of power-ups are ${p.name}. ` : ''}
+        {p.claimed ? 'Another power-up could turn up in a future first hand.' : 'Gone at midnight if you don\'t claim it.'}
+      </p>
+      <Msg error={error} />
+    </div>
+  );
+}
+
 // Today's hand is kept on this device, so it survives tab switches and reloads.
 // A new hand is dealt each UK day and older ones are cleared out.
 const HAND_KEY = 'yeahnah-hand-';
@@ -716,18 +760,39 @@ function Today(ctx) {
   const size = d.cfg.answers_per_day || 5;
   const daily = d.questions.find(q => q.daily_date === today);
   const inboxIds = [...new Set(inbox.map(c => c.question_id))];
-  // Five cards a day: today's question first, then four you haven't answered,
-  // in a shuffled order. Questions friends send you are extra cards on top.
+  // Everything you answered today stays in the stack, wherever you answered it,
+  // so the stack is the same on every device.
+  const answeredToday = Object.values(d.mine)
+    .filter(st => st.source === 'app' && d.byId[st.question_id]
+      && new Date(st.created_at).toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) === today)
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+    .map(st => st.question_id);
+  // Five cards a day: today's question first, then what you've answered today,
+  // then enough you haven't answered to make five, in a shuffled order.
+  // Questions friends send you are extra cards on top.
   const [hand, setHand] = useState(() => {
     const kept = loadHand(uid, today);
     if (kept && Array.isArray(kept.ids)) {
-      const ids = kept.ids.filter(id => d.byId[id]);
+      const ids = kept.ids.filter(id => (id === PU ? d.powerup : d.byId[id]));
       return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids };
     }
     const first = daily ? [daily.id] : [];
-    const ids = [...first, ...dealable(d, today, new Set([...first, ...inboxIds])).slice(0, size - first.length)];
-    return { ids, i: 0, seen: ids };
+    const done = answeredToday.filter(id => !first.includes(id));
+    // Enough to make five, or as many answers as you have left today if that's more.
+    const left = daily ? d.me.other_answers_left_today : d.me.answers_left_today;
+    const fresh = dealable(d, today, new Set([...first, ...done, ...inboxIds])).slice(0, Math.max(size - first.length - done.length, left, 0));
+    const ids = [...first, ...done, ...fresh];
+    // Today's power-up, if there is one, goes somewhere after the first card you haven't answered.
+    if (d.powerup) ids.splice(first.length + done.length + 1 + Math.floor(Math.random() * fresh.length), 0, PU);
+    return { ids, i: Math.max(ids.findIndex(id => !d.mine[id]), 0), seen: ids };
   });
+  // Something answered outside the stack today (in Questions, or on another device) joins it at the end.
+  useEffect(() => {
+    setHand(h => {
+      const missing = answeredToday.filter(id => !h.ids.includes(id));
+      return missing.length ? { ...h, ids: [...h.ids, ...missing], seen: [...new Set([...h.seen, ...missing])] } : h;
+    });
+  }, [answeredToday.join()]);
   // A friend's question is shuffled into the next few cards, including ones that arrive while you're here.
   useEffect(() => {
     setHand(h => {
@@ -735,19 +800,28 @@ function Today(ctx) {
       return fresh.length ? { ...h, ids: shuffleIn(h.ids, fresh, h.i), seen: [...h.seen, ...fresh] } : h;
     });
   }, [inbox.map(c => c.id).join()]);
+  // A hand dealt before today's power-up was known gets it shuffled into the next few cards.
+  useEffect(() => {
+    setHand(h => {
+      const has = h.ids.includes(PU);
+      if (!!d.powerup === has) return h;
+      if (d.powerup) return { ...h, ids: shuffleIn(h.ids, [PU], h.i), seen: [...new Set([...h.seen, PU])] };
+      const k = h.ids.indexOf(PU), ids = h.ids.filter(id => id !== PU);
+      return { ...h, ids, i: Math.max(0, Math.min(h.i > k ? h.i - 1 : h.i, ids.length - 1)) };
+    });
+  }, [!!d.powerup]);
   useEffect(() => saveHand(uid, today, hand), [hand]);
 
   const [note, setNote] = useState('');
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
   const n = hand.ids.length;
-  const q = d.byId[hand.ids[hand.i]];
   const byFriend = id => d.byId[id]?.audience === 'friends';
   // Today's question, questions friends sent you and friends wrote don't use up your daily answers.
   const counts = id => id === daily?.id || inboxIds.includes(id) || byFriend(id);
   const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
   // Today's question, questions friends sent and starred ones stay put until answered.
-  const canSwap = id => !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
+  const canSwap = id => id !== PU && !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
   const swappable = hand.ids.filter(canSwap);
   // Questions friends wrote and questions starred since the hand was dealt take the
   // place of other unanswered cards, starting from the back and never the card on top.
@@ -771,7 +845,7 @@ function Today(ctx) {
   const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
   // Each card's place in the stack: 0 on top, then the ones after it, wrapping round the hand.
   const slots = Object.fromEntries(hand.ids.map((id, k) => [id, (k - hand.i + n) % n]));
-  const motion = useDeckMotion({ slots, can: n > 1, pop: done, onSwipe: dir => (dir < 0 ? step(1) : step(-1)) });
+  const motion = useDeckMotion({ slots, can: n > 1, pop: done + (d.powerup?.claimed ? 1 : 0), onSwipe: dir => (dir < 0 ? step(1) : step(-1)) });
   // Swipe left (or Next) sends the top card to the back of the stack; swipe right (or Back) brings the last one back.
   function forward() {
     if (n < 2) return;
@@ -785,9 +859,9 @@ function Today(ctx) {
     if (k === hand.i) return;
     setNote(''); motion.dir(k < hand.i ? 1 : -1); setHand(h => ({ ...h, i: k }));
   }
-  // Shuffle swaps every unanswered card for one you haven't seen today, friends'
-  // questions first, keeping answered cards, today's question, questions friends
-  // sent and starred ones.
+  // Shuffle only ever swaps unanswered cards, for ones you haven't seen today,
+  // friends' questions first. Answered cards stay, and so do today's question,
+  // questions friends sent and starred ones until you answer them.
   function reshuffle() {
     const fresh = dealable(d, today, new Set([...hand.ids, ...hand.seen]));
     const pool = fresh.length >= swappable.length ? fresh
@@ -811,31 +885,35 @@ function Today(ctx) {
   return (
     <>
       <div className="head">
-        <span className="eyebrow">{date} · {q ? `Card ${hand.i + 1} of ${n} · ${done} answered` : 'All done'}</span>
+        <span className="eyebrow">{date} · {n ? `Card ${hand.i + 1} of ${n} · ${done} answered` : 'All done'}</span>
       </div>
-      {!q ? (
+      {!n ? (
         <div className="card deck-end">
           <h2 className="qtext">You've seen them all</h2>
           <p className="hint">New questions arrive every day. Suggest one in the Questions tab.</p>
         </div>
       ) : (
         <div className="deck">
-          {hand.ids.filter(id => d.byId[id]).map(id => (
+          {hand.ids.filter(id => (id === PU ? d.powerup : d.byId[id])).map(id => (
             <div key={id} ref={motion.cardRef(id)} className={`slot${slots[id] === 0 ? ' top' : ''}`}>
-              <QuestionCard q={d.byId[id]} deck noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />
+              {id === PU ? <PowerUpCard p={d.powerup} reload={ctx.reload} />
+                : <QuestionCard q={d.byId[id]} deck noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />}
             </div>
           ))}
         </div>
       )}
-      {q && (
+      {n > 0 && (
         <>
           <div className="deck-nav">
             <button className="ghost" onClick={back} disabled={n < 2} aria-label="Previous card">‹ Back</button>
             <div className="dots" aria-label="Cards in today's hand">
-              {hand.ids.map((id, k) => (
+              {hand.ids.map((id, k) => (id === PU ? (
+                <button key={id} className={`dot powerup ${d.powerup?.rarity}${d.powerup?.claimed ? ' done' : ''}`} aria-current={k === hand.i}
+                  aria-label={`Card ${k + 1}, power-up${d.powerup?.claimed ? ', claimed' : ''}`} onClick={() => jump(k)} />
+              ) : (
                 <button key={id} className={`dot${d.mine[id] ? ' done' : ''}${tintOf(d.byId[id], d)}`} aria-current={k === hand.i}
                   aria-label={`Card ${k + 1}${d.mine[id] ? ', answered' : ''}`} onClick={() => jump(k)} />
-              ))}
+              )))}
             </div>
             <button className="ghost" onClick={forward} disabled={n < 2} aria-label="Next card">Next ›</button>
           </div>

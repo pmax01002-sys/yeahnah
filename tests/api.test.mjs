@@ -38,7 +38,8 @@ let alice, bob, tia, daily, others;
 const yearsAgo = n => new Date(Date.now() - n * 365.25 * 864e5).toISOString().slice(0, 10);
 const setMinAge = n => ok(admin.from('app_config').update({ value: n }).eq('key', 'min_age'));
 const setDefaultPublic = n => ok(admin.from('app_config').update({ value: n }).eq('key', 'new_answers_public'));
-after(() => Promise.all([setMinAge(18), setDefaultPublic(1)]));
+const setPowerupChance = n => ok(admin.from('app_config').update({ value: n }).eq('key', 'powerup_chance'));
+after(() => Promise.all([setMinAge(18), setDefaultPublic(1), setPowerupChance(50)]));
 
 test('sign-up is 18+ for now', async () => {
   const kid = await user('kid17');
@@ -475,6 +476,38 @@ test('question links: anyone with the link can see and answer, even signed out f
   await fails(newbie.rpc('open_question_link', { p_code: pcode }), /waiting for a moderator/);
   await ok(admin.from('questions').update({ status: 'approved' }).eq('id', pq));
   assert.equal((await ok(newbie.rpc('open_question_link', { p_code: pcode }))).id, pq);
+});
+
+test('power-ups: drawn once a day, claimed once for slashes', async () => {
+  const [unlucky, lucky] = [await user('unlucky', '1990-08-08'), await user('lucky', '1991-08-08')];
+  const kinds = await ok(lucky.from('powerup_kinds').select('kind,rarity,weight,slashes'));
+  assert.deepEqual(kinds.map(k => k.rarity).sort(), ['common', 'epic', 'legendary', 'rare', 'uncommon']);
+
+  // No power-up today stays that way, even if the odds change later in the day.
+  await setPowerupChance(0);
+  assert.equal(await ok(unlucky.rpc('todays_powerup')), null);
+  await setPowerupChance(100);
+  assert.equal(await ok(unlucky.rpc('todays_powerup')), null);
+  await fails(unlucky.rpc('claim_powerup'), /nothing to claim/);
+
+  const p = await ok(lucky.rpc('todays_powerup'));
+  assert.ok(kinds.some(k => k.kind === p.kind && k.slashes === p.slashes));
+  assert.equal(p.claimed, false);
+  assert.ok(p.odds > 0 && p.odds <= 50);
+  assert.equal((await ok(lucky.rpc('todays_powerup'))).kind, p.kind, 'same card on every device');
+  await fails(lucky.from('powerups').update({ kind: 'golden_slash' }).eq('kind', p.kind));
+  assert.equal((await ok(lucky.rpc('todays_powerup'))).kind, p.kind);
+
+  assert.equal(await ok(lucky.rpc('claim_powerup')), p.slashes);
+  assert.equal((await me(lucky)).credits, 10 + p.slashes);
+  assert.equal((await ok(lucky.rpc('todays_powerup'))).claimed, true);
+  await fails(lucky.rpc('claim_powerup'), /nothing to claim/);
+  assert.equal((await me(lucky)).credits, 10 + p.slashes);
+  const mine = (await ok(lucky.rpc('export_my_data'))).power_ups;
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].slashes, p.slashes);
+  assert.equal((await ok(unlucky.rpc('export_my_data'))).power_ups.length, 0);
+  await setPowerupChance(50);
 });
 
 test('feedback lands in a table only its author (and the owner) can read', async () => {

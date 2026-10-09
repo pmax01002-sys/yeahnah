@@ -226,6 +226,43 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .card.daily .panel, .card.friend .panel { background: transparent; }
 @media (prefers-reduced-motion: reduce) { .deck .split .y { animation: none !important; } }
 
+/* Power-up cards: one colour per rarity, from grey up to gold. */
+.powerup { --rar: #6B6B6B; }
+.powerup.uncommon { --rar: #1D7A45; }
+.powerup.rare { --rar: #2F62C9; }
+.powerup.epic { --rar: #8E3381; }
+.powerup.legendary { --rar: #B7790B; }
+:root[data-theme="phosphor"] .powerup { --rar: #5E8F55; }
+:root[data-theme="phosphor"] .powerup.uncommon { --rar: #9FF58A; }
+:root[data-theme="phosphor"] .powerup.rare { --rar: #6FD3FF; }
+:root[data-theme="phosphor"] .powerup.epic { --rar: #FF6EC7; }
+:root[data-theme="phosphor"] .powerup.legendary { --rar: #FFB35C; }
+.card.powerup .chip.rarity { background: var(--rar); color: var(--hi-ink); border-color: var(--ink); font-weight: 600; text-transform: capitalize; }
+.pips { display: inline-flex; gap: 2px; align-items: center; }
+.pips i { width: 7px; height: 7px; border: 1px solid var(--ink); background: var(--surface); }
+.pips i.on { background: var(--rar); }
+.pu-art {
+  min-height: clamp(120px, 24vh, 210px); border: var(--b) solid var(--ink); border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  color: var(--hi-ink); font-family: var(--display); line-height: 1;
+  background: repeating-linear-gradient(135deg, transparent 0 10px, rgb(255 255 255 / .14) 10px 20px), var(--rar);
+}
+.pu-art .n { font-size: 68px; font-weight: 700; text-shadow: 3px 3px 0 var(--ink); }
+.pu-art .w { font-size: 16px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+.powerup.legendary .pu-art {
+  background: linear-gradient(110deg, transparent 35%, rgb(255 246 200 / .7) 50%, transparent 65%) 0 0 / 300% 100%,
+    repeating-linear-gradient(135deg, transparent 0 10px, rgb(255 255 255 / .18) 10px 20px), var(--rar);
+  animation: pu-shine 2.6s linear infinite;
+}
+@keyframes pu-shine { from { background-position: 100% 0, 0 0, 0 0; } to { background-position: -50% 0, 0 0, 0 0; } }
+.powerup.claimed .pu-art { background: var(--dither); color: var(--ink); animation: none; }
+.powerup.claimed .pu-art .n { text-shadow: 3px 3px 0 var(--surface); }
+.pu-claim { align-self: stretch; font-size: 18px; padding: 12px 14px; }
+.pu-done { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--display); font-weight: 600; }
+.dot.powerup { background: var(--rar); }
+.dot.powerup.done { background: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .powerup .pu-art { animation: none !important; } }
+
 /* pixel icons (icons.jsx): ink is currentColor; on an inverted selection the red and green go to the same ink */
 .px { display: inline-block; vertical-align: middle; flex: none; }
 .chip .px { vertical-align: -1px; }

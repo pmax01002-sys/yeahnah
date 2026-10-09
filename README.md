@@ -12,7 +12,7 @@ tests/     24 end-to-end checks of the rules, run through the same API the app u
 ## What it does
 
 - Sign up with email and password, then a profile with handle, name and date of birth. **18+ only for now.** The under-18 rules below are still built in, and come back if you lower `min_age` in `app_config` (13 is the floor for UK apps).
-- **Today**: a hand of 5 cards a day, starting with the daily question ("Is the Earth flat?" on launch day). Tap left or right to answer, swipe left for the next card and right to go back. The hand is kept on your phone until the next day, answered cards keep their crowd split and friends' answers, and Shuffle swaps the unanswered ones. Questions friends send you are extra green cards. Star questions in the Questions tab and they're dealt in first.
+- **Today**: a hand of 5 cards a day, starting with the daily question ("Is the Earth flat?" on launch day). Tap left or right to answer, swipe left for the next card and right to go back. The hand is kept on your phone until the next day, answered cards keep their crowd split and friends' answers, and Shuffle swaps the unanswered ones. Questions friends send you are extra green cards. Star questions in the Questions tab and they're dealt in first. Some days the first hand also has a **power-up card**: five of them, common to legendary, each holding 1 to 10 slashes to claim before midnight. `powerup_chance` in `app_config` is the percent of days with one (50 to start), and each card's odds and slashes are rows in `powerup_kinds`.
 - **Themes**: 139 questions in 20 themes, including Sport, Music, Film & TV, Travel, Work, Dating, Food, Mysteries, Future, Nostalgia and Brands. The Questions tab shows each theme with how many you've answered; tap one to see just those. Picks like "Messi or Ronaldo?" show both names as the answer buttons.
 - **5 answers a day**, one always kept for the daily question. **One change of mind a day**, and the changed answer is hidden from others for 7 days.
 - **Who sees each answer**: public, friends or private. Your last choice carries over, except sensitive answers, which always start private. Before you pick one, standard answers start public; set `new_answers_public` to 0 in `app_config` to start them friends-only. Under-18s can never be public.
@@ -47,7 +47,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, the economy record) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, the economy record, power-up cards) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
