@@ -107,7 +107,7 @@ GitHub Actions (`.github/workflows/mobile.yml`) builds both on every change to `
 - **Android**: a debug APK under the run's **Artifacts**. Download it on an Android phone and open it to install (allow installs from your browser when asked).
 - **iPhone**: a simulator build, which checks the Xcode project compiles. Putting it on real iPhones needs TestFlight, below.
 
-Set these under **Settings > Secrets and variables > Actions > Variables** so the apps reach the same database as the website: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_SITE_URL` (the website address, used in invite links).
+Set these under **Settings > Secrets and variables > Actions > Variables** so the apps reach the same database as the website: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Invite links from the apps point at https://yeahnah.cookiebadboy.com; set `VITE_SITE_URL` only to use a different address.
 
 **TestFlight**: join the Apple Developer Program, create the app in App Store Connect with bundle id `app.yeahnah`, make an App Store Connect API key (Users and Access > Integrations, App Manager role) and add these repository secrets: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (the .p8 file's text) and `APPLE_TEAM_ID`. Then run the workflow by hand with **release** ticked.
 

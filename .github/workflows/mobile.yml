@@ -9,7 +9,7 @@
 #
 # Repository variables (Settings > Secrets and variables > Actions > Variables):
 #   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY  the same values the website uses
-#   VITE_SITE_URL                              the website address, used in invite links
+#   VITE_SITE_URL                              optional; invite links default to https://yeahnah.cookiebadboy.com
 name: Mobile apps
 
 on:
@@ -28,7 +28,7 @@ on:
 env:
   VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
   VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
-  VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
+  VITE_SITE_URL: ${{ vars.VITE_SITE_URL || 'https://yeahnah.cookiebadboy.com' }}
 
 defaults:
   run:
