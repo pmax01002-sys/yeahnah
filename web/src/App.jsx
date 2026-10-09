@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
+import { useDeckMotion } from './deckMotion.js';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -603,36 +604,32 @@ function Today(ctx) {
   }, [inbox.map(c => c.id).join()]);
   useEffect(() => saveHand(uid, today, hand), [hand]);
 
-  const [drag, setDrag] = useState(null);
-  const [leaving, setLeaving] = useState(0);
-  const [enter, setEnter] = useState('');
-  const [dealt, setDealt] = useState(0);
   const [note, setNote] = useState('');
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
   const n = hand.ids.length;
   const q = d.byId[hand.ids[hand.i]];
-  const answered = q && d.mine[q.id];
   const counts = id => id === daily?.id || inboxIds.includes(id);
-  const outOfAnswers = q && !answered && !counts(q.id) && d.me.other_answers_left_today <= 0;
   const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
   const swappable = hand.ids.filter(id => !d.mine[id] && id !== daily?.id && !fromFriend(id));
   const done = hand.ids.filter(id => d.mine[id]).length;
 
   const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
+  // Each card's place in the stack: 0 on top, then the ones after it, wrapping round the hand.
+  const slots = Object.fromEntries(hand.ids.map((id, k) => [id, (k - hand.i + n) % n]));
+  const motion = useDeckMotion({ slots, can: n > 1, pop: done, onSwipe: dir => (dir < 0 ? step(1) : step(-1)) });
   // Swipe left (or Next) sends the top card to the back of the stack; swipe right (or Back) brings the last one back.
   function forward() {
-    if (leaving || n < 2) return;
-    setLeaving(-1); setNote('');
-    setTimeout(() => { setLeaving(0); setDrag(null); setEnter(''); step(1); }, 230);
+    if (n < 2) return;
+    setNote(''); motion.dir(-1); step(1);
   }
   function back() {
-    if (leaving || n < 2) return;
-    setDrag(null); setNote(''); setEnter('back'); step(-1);
+    if (n < 2) return;
+    setNote(''); motion.dir(1); step(-1);
   }
   function jump(k) {
-    if (leaving || k === hand.i) return;
-    setNote(''); setEnter(k < hand.i ? 'back' : 'deal'); setHand(h => ({ ...h, i: k }));
+    if (k === hand.i) return;
+    setNote(''); motion.dir(k < hand.i ? 1 : -1); setHand(h => ({ ...h, i: k }));
   }
   // Shuffle swaps every unanswered card for one you haven't seen today, keeping
   // answered cards, today's question and questions friends sent.
@@ -644,7 +641,6 @@ function Today(ctx) {
     let k = 0;
     const ids = hand.ids.map(id => (swappable.includes(id) && k < pool.length ? pool[k++] : id));
     setHand(h => ({ ...h, ids, seen: [...new Set([...h.seen, ...ids])] }));
-    setEnter('deal'); setDealt(x => x + 1);
     setNote(`Swapped ${k} card${k === 1 ? '' : 's'}.`);
   }
   useEffect(() => {
@@ -656,30 +652,6 @@ function Today(ctx) {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   });
-
-  const swipe = {
-    onPointerDown: e => { if (!leaving && e.button === 0) setDrag({ x0: e.clientX, dx: 0, on: false }); },
-    onPointerMove: e => {
-      if (!drag) return;
-      const dx = e.clientX - drag.x0;
-      if (!drag.on && Math.abs(dx) > 10) { e.currentTarget.setPointerCapture(e.pointerId); }
-      setDrag({ ...drag, dx, on: drag.on || Math.abs(dx) > 10 });
-    },
-    onPointerUp: () => {
-      if (drag && drag.on && drag.dx < -80) forward();
-      else if (drag && drag.on && drag.dx > 80) back();
-      else setDrag(null);
-    },
-    onPointerCancel: () => setDrag(null),
-  };
-  // The top card follows your finger to the left; to the right it only gives a little, since that pulls the last card back.
-  const pull = drag && drag.on ? (drag.dx < 0 || n < 2 ? drag.dx : drag.dx * 0.35) : 0;
-  const style = leaving
-    ? { transform: `translateX(${leaving * 130}%) rotate(${leaving * 14}deg)`, transition: 'transform .23s ease-in' }
-    : drag && drag.on
-      ? { transform: `translateX(${pull}px) rotate(${pull / 22}deg)` }
-      : { transition: 'transform .18s ease-out' };
-  const behind = Array.from({ length: Math.min(n - 1, 4) }, (_, k) => hand.ids[(hand.i + 1 + k) % n]);
 
   return (
     <>
@@ -693,10 +665,11 @@ function Today(ctx) {
         </div>
       ) : (
         <div className="deck">
-          {behind.map((id, k) => <div key={`${id}-${k}`} className={`card behind b${k + 1}${tintOf(d.byId[id], d)}`} aria-hidden="true" />).reverse()}
-          <div key={`${q.id}-${dealt}`} className={`top${enter ? ` enter-${enter}` : ''}`} style={style} {...swipe}>
-            <QuestionCard key={q.id} q={q} deck noAnswers={outOfAnswers} {...ctx} />
-          </div>
+          {hand.ids.filter(id => d.byId[id]).map(id => (
+            <div key={id} ref={motion.cardRef(id)} className={`slot${slots[id] === 0 ? ' top' : ''}`}>
+              <QuestionCard q={d.byId[id]} deck noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />
+            </div>
+          ))}
         </div>
       )}
       {q && (

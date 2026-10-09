@@ -174,19 +174,14 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .hint a { color: inherit; font-weight: 600; text-underline-offset: 3px; }
 
 /* Today: a hand of question cards. Tap left or right to answer, swipe left for the next card, right to go back. */
-.deck { display: grid; margin: 0 16px 16px 0; }
+.deck { display: grid; margin: 0 20px 24px 0; }
 .deck > * { grid-area: 1 / 1; }
-.deck .behind { box-shadow: none; }
-.deck .behind.b1 { transform: translate(4px, 4px); }
-.deck .behind.b2 { transform: translate(8px, 8px); }
-.deck .behind.b3 { transform: translate(12px, 12px); }
-.deck .behind.b4 { transform: translate(16px, 16px); }
-.deck .top { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
-.deck .top .card { height: 100%; }
-.deck .top.enter-back { animation: deck-back .24s ease-out; }
-.deck .top.enter-deal { animation: deck-deal .22s ease-out; }
-@keyframes deck-back { from { transform: translateX(-130%) rotate(-14deg); } }
-@keyframes deck-deal { from { transform: translate(8px, 8px); opacity: .4; } }
+/* Every card in the hand is in the stack; deckMotion.js places and moves them. */
+.deck .slot { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; transform-origin: 50% 60%; }
+.deck .slot > .card { height: 100%; box-sizing: border-box; transition: box-shadow .15s ease-out; }
+.deck .slot:not(.top) > .card { box-shadow: 1px 1px 0 var(--ink); }
+.deck .slot.lifted > .card { box-shadow: 7px 9px 0 var(--ink); }
+.deck .slot.lifted .big:active { background: var(--surface); color: var(--ink); }
 .answer-row.halves .big { min-height: clamp(120px, 26vh, 220px); }
 .split.tall { height: 44px; font-size: 15px; }
 .deck .split .y { animation: split-grow .5s ease-out; }
@@ -217,4 +212,4 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .card.friend { background: var(--friend); }
 .chip.friend { background: var(--friend); font-weight: 600; }
 .card.daily .panel, .card.friend .panel { background: transparent; }
-@media (prefers-reduced-motion: reduce) { .deck .top, .deck .split .y { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .deck .split .y { animation: none !important; } }
