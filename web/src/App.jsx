@@ -310,7 +310,7 @@ function Signed() {
         <div className="brand"><span>yeah</span>/<em>nah</em></div>
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
-          <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
+          <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.unlimited ? '∞ slashes' : `${d.me.credits} ${d.me.credits === 1 ? 'slash' : 'slashes'}`}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
@@ -1079,7 +1079,7 @@ function FutureLocked({ d, reload }) {
         <div className="panel">
           <span>Guess how everyone will answer today's question, what your friends will say, and what will happen in the world. Every guess builds a hit rate on your profile.</span>
           <ul className="needs">
-            <Need ok={enough}>{cost} slashes, once. You have {d.me.credits}.</Need>
+            <Need ok={enough}>{cost} slashes, once. You have {d.me.unlimited ? 'unlimited slashes' : d.me.credits}.</Need>
             <Need ok={d.me.is_adult}>A date of birth on your profile showing you're 18 or over.</Need>
           </ul>
           <button className="solid" disabled={!ready || busy} onClick={unlock}>{busy ? 'Unlocking…' : `Unlock Future · ${cost} slashes`}</button>

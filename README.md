@@ -28,7 +28,7 @@ tests/     24 end-to-end checks of the rules, run through the same API the app u
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
 
-All the numbers (5 a day, slash costs, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code.
+All the numbers (5 a day, slash costs, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code. To give an account unlimited slashes (for trying things out), run `select public.give_unlimited_slashes('handle');` in the SQL Editor: spending still works but costs that account nothing, and the app shows ∞. The `harley` account gets this automatically.
 
 ## Put it online (about 20 minutes, £0)
 
@@ -46,7 +46,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up cards) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up cards, unlimited slashes for the owner's account) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
