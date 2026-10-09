@@ -8,12 +8,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Pixelify+Sans:wght@400;600;700&display=swap" />
 <style>
+  /* Clear numbers: digits and % from Jersey 15, as in the app. */
+  @font-face { font-family: "YN Digits"; src: url("https://fonts.gstatic.com/s/jersey15/v4/_6_9EDzuROGsUuk2TWjiZYAg.woff2") format("woff2");
+               unicode-range: U+0030-0039, U+0025; size-adjust: 116%; font-weight: 100 900; font-display: swap; }
   /* Same retro look as the app: a 1-bit window on a pink desk. Paper is the default; Phosphor only with data-theme="phosphor". */
   :root {
     --desk: #FF6EC7; --dot: #D93A95; --surface: #FBFBF8; --ink: #141414; --hi: #141414; --hi-ink: #FBFBF8;
     --yes: #1D7A45; --no: #C8352B;
     --stripes: repeating-linear-gradient(var(--surface) 0 3px, var(--ink) 3px 4px);
-    --display: "Pixelify Sans", "Chicago", "Geneva", ui-monospace, monospace;
+    --display: "YN Digits", "Pixelify Sans", "Chicago", "Geneva", ui-monospace, monospace;
     --body: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
     --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23C8352B' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");
     color-scheme: light;
@@ -21,7 +24,7 @@
   :root[data-theme="phosphor"] { --desk: #13060E; --dot: #4D1736; --surface: #0C120D; --ink: #9FF58A; --hi: #9FF58A; --hi-ink: #0C120D;
             --yes: #9FF58A; --no: #FFB35C; --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%239FF58A' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%239FF58A' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FFB35C' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E"); color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; color: var(--ink); font: 14px/1.6 var(--body); -webkit-font-smoothing: none;
+  body { margin: 0; color: var(--ink); font: 14px/1.6 var(--body); -webkit-font-smoothing: none; font-variant-ligatures: no-common-ligatures;
          background: radial-gradient(circle at 1px 1px, var(--dot) 0.9px, transparent 1.1px) 0 0 / 4px 4px, var(--desk); }
   main { max-width: 440px; margin: 0 auto; background: var(--surface); min-height: 100vh; padding: 0 16px 40px; }
   @media (min-width: 480px) { main { margin: 20px auto; min-height: 0; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 0 22px 36px; } }
