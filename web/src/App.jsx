@@ -313,16 +313,22 @@ function VisibilityPicker({ d, value, onChange, label }) {
   );
 }
 
-function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
+// Green for a question a friend sent you, pink for today's question.
+function tintOf(q, d) {
+  if (d.challenges.some(c => c.to_user === d.me.id && c.question_id === q.id)) return ' friend';
+  return q.daily_date === todayUK() ? ' daily' : '';
+}
+
+function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }) {
   const mine = d.mine[q.id];
   const [vis, setVis] = useState(() => startingVisibility(q, d));
   const [split, setSplit] = useState(null);
   const [friendAns, setFriendAns] = useState([]);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const [sendTo, setSendTo] = useState('');
-  const [timer, setTimer] = useState(1440);
+  const [sending, setSending] = useState(false);
   const challenge = inbox.find(c => c.question_id === q.id);
+  const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
 
   useEffect(() => {
     setError(''); setNote('');
@@ -345,6 +351,8 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
         <button className="solid" onClick={() => act('set_sensitive_opt_in', { p_on: true })}>Turn on sensitive questions</button>
       </div>
     );
+  } else if (!mine && noAnswers) {
+    body = <p className="hint">You've used today's answers. Questions friends send you still count, and there's a new hand tomorrow.</p>;
   } else if (!mine) {
     const opts = q.option_yes
       ? [[true, q.emoji_yes, q.option_yes], [false, q.emoji_no, q.option_no]]
@@ -366,7 +374,7 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
   } else {
     const pct = split && split.total ? Math.round((100 * split.yes) / split.total) : 0;
     const hidden = mine.hidden_until && new Date(mine.hidden_until) > now;
-    const canSend = !deck && q.sensitivity !== 'sensitive' && d.friends.length > 0;
+    const canSend = q.sensitivity !== 'sensitive' && d.friends.length > 0;
     body = (
       <>
         <div className="inline">
@@ -375,7 +383,7 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
         </div>
         {split && (
           <>
-            <div className={`split${q.option_yes ? ' pick' : ''}`} role="img" aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}`}>
+            <div className={`split${q.option_yes ? ' pick' : ''}${deck ? ' tall' : ''}`} role="img" aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}`}>
               <div className="y" style={{ width: `${pct}%` }}>{pct}% {q.option_yes ? q.emoji_yes : 'yeah'}</div>
               <div className="n">{100 - pct}% {q.option_yes ? q.emoji_no : 'nah'}</div>
             </div>
@@ -389,8 +397,8 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
           <div className="hook">You're one of the {pct}% who said yeah.</div>}
         {hidden && <p className="hint">You changed your mind, so this stays hidden from others until {new Date(mine.hidden_until).toLocaleDateString('en-GB')}.</p>}
         {deck ? (
-          <p className="hint">Seen by: {mine.visibility === 'public' ? 'everyone' : mine.visibility === 'friends' ? 'your friends' : 'only you'}.{' '}
-            <button className="linkbtn" onClick={() => open(q.id)}>Change it, or send to a friend</button></p>
+          <p className="hint">Seen by {mine.visibility === 'public' ? 'everyone' : mine.visibility === 'friends' ? 'your friends' : 'only you'}.{' '}
+            <button className="linkbtn" onClick={() => open(q.id)}>Change</button></p>
         ) : (
           <VisibilityPicker d={d} value={mine.visibility} label="Who sees this answer on your profile"
             onChange={v => act('set_visibility', { p_question: q.id, p_visibility: v })} />
@@ -399,35 +407,91 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
               Change my answer to {word(q, !mine.value).toLowerCase()} (1 a day)</button>
           : <p className="hint">You've used today's change of mind.</p>)}
-        {canSend && (
-          <div className="panel">
-            <span className="label">Send to a friend (3 slashes). They get 2 if they answer in time.</span>
-            <div className="inline">
-              <select value={sendTo} onChange={e => setSendTo(e.target.value)} aria-label="Friend">
-                <option value="">Pick a friend</option>
-                {d.friends.map(f => <option key={f.id} value={f.handle}>{f.display_name} (@{f.handle})</option>)}
-              </select>
-            </div>
-            <div className="seg" role="group" aria-label="Timer">
-              {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
-            </div>
-            <button className="ghost" disabled={!sendTo}
-              onClick={() => act('send_challenge', { p_handle: sendTo, p_question: q.id, p_minutes: timer }, 'Sent. The clock is ticking.')}>Send</button>
-          </div>
-        )}
+        {canSend && (sending
+          ? <SendPanel q={q} d={d} reload={reload} friendAns={friendAns} onClose={() => setSending(false)} />
+          : <button className="ghost send-btn" onClick={() => setSending(true)}>📨 Send to friends or a group</button>)}
       </>
     );
   }
 
   return (
-    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${q.daily_date === todayUK() ? ' daily' : ''}`}>
+    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}`}>
       <Chips q={q}>
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
+        {sentBy && <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>}
         {challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
-      {challenge && !mine && <p className="hint">Sent by {d.person[challenge.from_user]?.display_name}. Answer before the timer runs out for 2 slashes. Doesn't count towards your daily answers.</p>}
+      {challenge && !mine && <p className="hint">Answer before the timer runs out for {d.cfg.challenge_reward ?? 2} slashes. Doesn't count towards your daily answers.</p>}
       {body}
+      <Msg error={error} note={note} />
+    </div>
+  );
+}
+
+// Send a question you've answered to friends: pick people one by one, or a whole group at once.
+function SendPanel({ q, d, reload, friendAns, onClose }) {
+  const cost = d.cfg.send_cost ?? 2;
+  const [picked, setPicked] = useState([]);
+  const [timer, setTimer] = useState(1440);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const friends = d.friends.filter(Boolean);
+  const nameOf = h => friends.find(f => f.handle === h)?.display_name || h;
+  const answered = new Set(friendAns.map(f => f.handle));
+  const sent = new Set(d.challenges.filter(c => c.from_user === d.me.id && c.question_id === q.id).map(c => d.person[c.to_user]?.handle));
+  const canGet = h => !answered.has(h) && !sent.has(h);
+  const groups = d.groups
+    .map(g => ({ ...g, handles: g.members.map(id => d.person[id]?.handle).filter(h => h && friends.some(f => f.handle === h) && canGet(h)) }))
+    .filter(g => g.handles.length);
+  const toggle = h => setPicked(p => (p.includes(h) ? p.filter(x => x !== h) : [...p, h]));
+  const toggleGroup = g => setPicked(p => (g.handles.every(h => p.includes(h))
+    ? p.filter(h => !g.handles.includes(h)) : [...new Set([...p, ...g.handles])]));
+  const total = picked.length * cost;
+
+  async function send() {
+    setBusy(true); setError(''); setNote('');
+    const ok = [], bad = [];
+    for (const h of picked) {
+      try { await call('send_challenge', { p_handle: h, p_question: q.id, p_minutes: timer }); ok.push(nameOf(h)); }
+      catch (e) { bad.push(`${nameOf(h)}: ${e.message}.`); }
+    }
+    setPicked([]); setBusy(false);
+    if (ok.length) setNote(`Sent to ${ok.join(', ')}. The clock is ticking.`);
+    if (bad.length) setError(bad.join(' '));
+    await reload();
+  }
+
+  return (
+    <div className="panel send">
+      <span className="label">Send to friends: {cost} slashes each. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
+      {groups.length > 0 && (
+        <div className="chips">
+          {groups.map(g => (
+            <button key={g.id} className="chip group" aria-pressed={g.handles.every(h => picked.includes(h))} onClick={() => toggleGroup(g)}>
+              Everyone in {g.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="chips">
+        {friends.map(f => (
+          <button key={f.handle} className="chip" aria-pressed={picked.includes(f.handle)} disabled={!canGet(f.handle)} onClick={() => toggle(f.handle)}>
+            {f.display_name}{answered.has(f.handle) ? ' · answered' : sent.has(f.handle) ? ' · sent' : ''}
+          </button>
+        ))}
+      </div>
+      <div className="seg" role="group" aria-label="Timer">
+        {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
+      </div>
+      <div className="inline">
+        <button className="solid" disabled={!picked.length || busy || total > d.me.credits} onClick={send}>
+          {busy ? 'Sending…' : picked.length ? `Send to ${picked.length} · ${total} slashes` : 'Pick who gets it'}
+        </button>
+        <button className="linkbtn" onClick={onClose}>Close</button>
+      </div>
+      {total > d.me.credits && <p className="hint">You have {d.me.credits} slashes.</p>}
       <Msg error={error} note={note} />
     </div>
   );
@@ -475,41 +539,112 @@ function interleave(qs) {
   return out;
 }
 
+// Questions that can be dealt: approved, unanswered, not today's or a future
+// daily, and sensitive ones only if you've opted in.
+function dealable(d, today, skip) {
+  return interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
+    && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
+    && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in))).map(q => q.id);
+}
+
+// Today's hand is kept on this device, so it survives tab switches and reloads.
+// A new hand is dealt each UK day and older ones are cleared out.
+const HAND_KEY = 'yeahnah-hand-';
+function loadHand(uid, date) {
+  try { return JSON.parse(localStorage.getItem(`${HAND_KEY}${uid}-${date}`)); } catch { return null; }
+}
+function saveHand(uid, date, hand) {
+  try {
+    for (let k = localStorage.length - 1; k >= 0; k--) {
+      const key = localStorage.key(k);
+      if (key && key.startsWith(`${HAND_KEY}${uid}-`) && !key.endsWith(date)) localStorage.removeItem(key);
+    }
+    localStorage.setItem(`${HAND_KEY}${uid}-${date}`, JSON.stringify(hand));
+  } catch { /* private window or storage blocked: the hand just lasts until reload */ }
+}
+
 function Today(ctx) {
   const { d, inbox } = ctx;
   const today = todayUK();
+  const uid = d.me.id;
+  const size = d.cfg.answers_per_day || 5;
   const daily = d.questions.find(q => q.daily_date === today);
-  // The deck is dealt when the tab opens: today's question first, then everything
-  // you haven't answered in a shuffled order, with questions friends sent you
-  // mixed into the first few cards.
-  const [ids, setIds] = useState(() => {
-    const sent = [...new Set(inbox.map(c => c.question_id))].filter(id => !d.mine[id]);
-    const rest = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
-      && (!q.daily_date || q.daily_date < today) && !sent.includes(q.id)
-      && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in))).map(q => q.id);
-    return daily ? shuffleIn([daily.id, ...rest.filter(id => id !== daily.id)], sent, 0) : shuffleIn(rest, sent, -1);
+  const inboxIds = [...new Set(inbox.map(c => c.question_id))];
+  // Five cards a day: today's question first, then four you haven't answered,
+  // in a shuffled order. Questions friends send you are extra cards on top.
+  const [hand, setHand] = useState(() => {
+    const kept = loadHand(uid, today);
+    if (kept && Array.isArray(kept.ids)) {
+      const ids = kept.ids.filter(id => d.byId[id]);
+      return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids };
+    }
+    const first = daily ? [daily.id] : [];
+    const ids = [...first, ...dealable(d, today, new Set([...first, ...inboxIds])).slice(0, size - first.length)];
+    return { ids, i: 0, seen: ids };
   });
-  const [i, setI] = useState(0);
-  // A friend's question that arrives while the deck is open is shuffled in just ahead.
+  // A friend's question is shuffled into the next few cards, including ones that arrive while you're here.
   useEffect(() => {
-    const fresh = [...new Set(inbox.map(c => c.question_id))].filter(id => !d.mine[id] && !ids.slice(i).includes(id));
-    if (fresh.length) setIds(cur => shuffleIn(cur.filter((id, k) => k <= i || !fresh.includes(id)), fresh, i));
+    setHand(h => {
+      const fresh = inboxIds.filter(id => d.byId[id] && !h.ids.includes(id));
+      return fresh.length ? { ...h, ids: shuffleIn(h.ids, fresh, h.i), seen: [...h.seen, ...fresh] } : h;
+    });
   }, [inbox.map(c => c.id).join()]);
+  useEffect(() => saveHand(uid, today, hand), [hand]);
+
   const [drag, setDrag] = useState(null);
   const [leaving, setLeaving] = useState(0);
+  const [enter, setEnter] = useState('');
+  const [dealt, setDealt] = useState(0);
+  const [note, setNote] = useState('');
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
-  const q = d.byId[ids[i]];
+  const n = hand.ids.length;
+  const q = d.byId[hand.ids[hand.i]];
   const answered = q && d.mine[q.id];
-  const sentIds = new Set(inbox.map(c => c.question_id));
-  const outOfAnswers = q && !answered && q.id !== daily?.id && !sentIds.has(q.id) && d.me.other_answers_left_today <= 0;
+  const counts = id => id === daily?.id || inboxIds.includes(id);
+  const outOfAnswers = q && !answered && !counts(q.id) && d.me.other_answers_left_today <= 0;
+  const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
+  const swappable = hand.ids.filter(id => !d.mine[id] && id !== daily?.id && !fromFriend(id));
+  const done = hand.ids.filter(id => d.mine[id]).length;
 
-  function next(dir) {
-    if (leaving) return;
-    setLeaving(dir);
-    setTimeout(() => { setLeaving(0); setDrag(null); setI(x => x + 1); }, 230);
+  const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
+  // Swipe left (or Next) sends the top card to the back of the stack; swipe right (or Back) brings the last one back.
+  function forward() {
+    if (leaving || n < 2) return;
+    setLeaving(-1); setNote('');
+    setTimeout(() => { setLeaving(0); setDrag(null); setEnter(''); step(1); }, 230);
   }
-  // Swipe either way: before answering it skips, after answering it moves on.
+  function back() {
+    if (leaving || n < 2) return;
+    setDrag(null); setNote(''); setEnter('back'); step(-1);
+  }
+  function jump(k) {
+    if (leaving || k === hand.i) return;
+    setNote(''); setEnter(k < hand.i ? 'back' : 'deal'); setHand(h => ({ ...h, i: k }));
+  }
+  // Shuffle swaps every unanswered card for one you haven't seen today, keeping
+  // answered cards, today's question and questions friends sent.
+  function reshuffle() {
+    const fresh = dealable(d, today, new Set([...hand.ids, ...hand.seen]));
+    const pool = fresh.length >= swappable.length ? fresh
+      : [...fresh, ...dealable(d, today, new Set([...hand.ids, ...fresh]))];
+    if (!pool.length) { setNote('No other questions left to swap in.'); return; }
+    let k = 0;
+    const ids = hand.ids.map(id => (swappable.includes(id) && k < pool.length ? pool[k++] : id));
+    setHand(h => ({ ...h, ids, seen: [...new Set([...h.seen, ...ids])] }));
+    setEnter('deal'); setDealt(x => x + 1);
+    setNote(`Swapped ${k} card${k === 1 ? '' : 's'}.`);
+  }
+  useEffect(() => {
+    const key = e => {
+      if (document.querySelector('.scrim') || (e.target.closest && e.target.closest('input, select, textarea'))) return;
+      if (e.key === 'ArrowRight') forward();
+      if (e.key === 'ArrowLeft') back();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
+
   const swipe = {
     onPointerDown: e => { if (!leaving && e.button === 0) setDrag({ x0: e.clientX, dx: 0, on: false }); },
     onPointerMove: e => {
@@ -518,41 +653,57 @@ function Today(ctx) {
       if (!drag.on && Math.abs(dx) > 10) { e.currentTarget.setPointerCapture(e.pointerId); }
       setDrag({ ...drag, dx, on: drag.on || Math.abs(dx) > 10 });
     },
-    onPointerUp: () => { if (drag && drag.on && Math.abs(drag.dx) > 80) next(Math.sign(drag.dx)); else setDrag(null); },
+    onPointerUp: () => {
+      if (drag && drag.on && drag.dx < -80) forward();
+      else if (drag && drag.on && drag.dx > 80) back();
+      else setDrag(null);
+    },
     onPointerCancel: () => setDrag(null),
   };
+  // The top card follows your finger to the left; to the right it only gives a little, since that pulls the last card back.
+  const pull = drag && drag.on ? (drag.dx < 0 || n < 2 ? drag.dx : drag.dx * 0.35) : 0;
   const style = leaving
     ? { transform: `translateX(${leaving * 130}%) rotate(${leaving * 14}deg)`, transition: 'transform .23s ease-in' }
     : drag && drag.on
-      ? { transform: `translateX(${drag.dx}px) rotate(${drag.dx / 22}deg)` }
+      ? { transform: `translateX(${pull}px) rotate(${pull / 22}deg)` }
       : { transition: 'transform .18s ease-out' };
-  const behind = ids.slice(i + 1, i + 3);
+  const behind = Array.from({ length: Math.min(n - 1, 4) }, (_, k) => hand.ids[(hand.i + 1 + k) % n]);
 
   return (
     <>
       <div className="head">
-        <span className="eyebrow">{date} · {q && q.id === daily?.id ? "Today's question" : q ? `${ids.length - i - 1} more after this` : 'All done'}</span>
+        <span className="eyebrow">{date} · {q ? `Card ${hand.i + 1} of ${n} · ${done} answered` : 'All done'}</span>
       </div>
-      {!q || outOfAnswers ? (
+      {!q ? (
         <div className="card deck-end">
-          <h2 className="qtext">{q ? 'That\'s your answers for today' : 'You\'ve seen them all'}</h2>
-          <p className="hint">{q
-            ? 'Come back tomorrow for a new daily question. Questions friends send you still count.'
-            : 'New questions arrive every day. Suggest one in the Questions tab.'}</p>
+          <h2 className="qtext">You've seen them all</h2>
+          <p className="hint">New questions arrive every day. Suggest one in the Questions tab.</p>
         </div>
       ) : (
         <div className="deck">
-          {behind.map((id, k) => <div key={id} className={`card behind b${k + 1}`} aria-hidden="true" />).reverse()}
-          <div className="top" style={style} {...swipe}>
-            <QuestionCard key={q.id} q={q} deck {...ctx} />
+          {behind.map((id, k) => <div key={`${id}-${k}`} className={`card behind b${k + 1}${tintOf(d.byId[id], d)}`} aria-hidden="true" />).reverse()}
+          <div key={`${q.id}-${dealt}`} className={`top${enter ? ` enter-${enter}` : ''}`} style={style} {...swipe}>
+            <QuestionCard key={q.id} q={q} deck noAnswers={outOfAnswers} {...ctx} />
           </div>
         </div>
       )}
-      {q && !outOfAnswers && (
-        <div className="deck-nav">
-          <span className="hint">{answered ? 'Swipe for the next question' : 'Swipe to skip'}</span>
-          <button className="ghost" onClick={() => next(-1)}>{answered ? 'Next →' : 'Skip →'}</button>
-        </div>
+      {q && (
+        <>
+          <div className="deck-nav">
+            <button className="ghost" onClick={back} disabled={n < 2} aria-label="Previous card">‹ Back</button>
+            <div className="dots" aria-label="Cards in today's hand">
+              {hand.ids.map((id, k) => (
+                <button key={id} className={`dot${d.mine[id] ? ' done' : ''}${tintOf(d.byId[id], d)}`} aria-current={k === hand.i}
+                  aria-label={`Card ${k + 1}${d.mine[id] ? ', answered' : ''}`} onClick={() => jump(k)} />
+              ))}
+            </div>
+            <button className="ghost" onClick={forward} disabled={n < 2} aria-label="Next card">Next ›</button>
+          </div>
+          <div className="deck-nav">
+            <span className="hint">{note || 'Swipe left for the next card, right to go back.'}</span>
+            <button className="ghost" onClick={reshuffle} disabled={!swappable.length}>🔀 Shuffle</button>
+          </div>
+        </>
       )}
       <p className="hint" style={{ marginTop: 10 }}>
         {d.me.other_answers_left_today > 0

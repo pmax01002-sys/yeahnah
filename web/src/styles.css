@@ -12,6 +12,7 @@
   --mono: "Pixelify Sans", ui-monospace, Menlo, monospace;
   --b: 2px;
   --daily: #FFE3F3;                                       /* tint for today's question, from the desk pink */
+  --friend: #DDF2E4;                                      /* tint for a question a friend sent, from the yeah green */
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23C8352B' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");    /* the pixel Y/N, 20x7 */
   color-scheme: light;
 }
@@ -22,6 +23,7 @@
   --frame: #0C120D; --surface: #0C120D; --ink: #9FF58A; --muted: #9FF58A; --line: #9FF58A;
   --hi: #9FF58A; --hi-ink: #0C120D;
   --daily: #1E2A12;
+  --friend: #0F2E1F;
   --yes: #9FF58A; --no: #FFB35C; --oa: #9FF58A; --ob: #FFB35C; --sen: #FF6EC7;
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%239FF58A' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%239FF58A' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FFB35C' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");
   color-scheme: dark;
@@ -171,18 +173,45 @@ button.chip { cursor: pointer; }
 button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .hint a { color: inherit; font-weight: 600; text-underline-offset: 3px; }
 
-/* Today: a stack of question cards. Tap left or right to answer, swipe to move on. */
-.deck { display: grid; margin: 0 12px 12px 0; }
+/* Today: a hand of question cards. Tap left or right to answer, swipe left for the next card, right to go back. */
+.deck { display: grid; margin: 0 16px 16px 0; }
 .deck > * { grid-area: 1 / 1; }
 .deck .behind { box-shadow: none; }
-.deck .behind.b1 { transform: translate(6px, 6px); }
-.deck .behind.b2 { transform: translate(12px, 12px); }
+.deck .behind.b1 { transform: translate(4px, 4px); }
+.deck .behind.b2 { transform: translate(8px, 8px); }
+.deck .behind.b3 { transform: translate(12px, 12px); }
+.deck .behind.b4 { transform: translate(16px, 16px); }
 .deck .top { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .deck .top .card { height: 100%; }
+.deck .top.enter-back { animation: deck-back .24s ease-out; }
+.deck .top.enter-deal { animation: deck-deal .22s ease-out; }
+@keyframes deck-back { from { transform: translateX(-130%) rotate(-14deg); } }
+@keyframes deck-deal { from { transform: translate(8px, 8px); opacity: .4; } }
 .answer-row.halves .big { min-height: clamp(120px, 26vh, 220px); }
+.split.tall { height: 44px; font-size: 15px; }
+.deck .split .y { animation: split-grow .5s ease-out; }
+@keyframes split-grow { from { width: 0; } }
 .deck-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
+.deck-nav + .deck-nav { margin-top: 8px; }
+.deck-nav .ghost { padding: 6px 12px; font-size: 14px; flex: none; }
+.dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
+.dot { width: 14px; height: 14px; padding: 0; border: var(--b) solid var(--ink); background: var(--surface); }
+.dot.daily { background: var(--daily); }
+.dot.friend { background: var(--friend); }
+.dot.done { background: var(--ink); }
+.dot[aria-current="true"] { transform: translateY(-3px); box-shadow: 2px 2px 0 var(--ink); }
 .deck-end { text-align: left; }
+.send-btn { align-self: flex-start; padding: 6px 12px; font-size: 14px; }
+.panel.send .chips { gap: 8px; }
+.panel.send .chip { font-size: 13px; padding: 2px 9px; }
+.panel.send .chip:disabled { background: transparent !important; border-style: dashed; }
+button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
+.chip.group { border-style: dashed; }
 
-/* Today's question stands out with a tint. */
+/* Today's question is pink, a question a friend sent is green. */
 .card.daily { background: var(--daily); }
 .chip.daily { background: var(--daily); font-weight: 600; }
+.card.friend { background: var(--friend); }
+.chip.friend { background: var(--friend); font-weight: 600; }
+.card.daily .panel, .card.friend .panel { background: transparent; }
+@media (prefers-reduced-motion: reduce) { .deck .top, .deck .split .y { animation: none !important; } }
