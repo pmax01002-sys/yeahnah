@@ -3,6 +3,7 @@ import { supabase, configured, call } from './supabase.js';
 import { Px } from './icons.jsx';
 import { useDeckMotion } from './deckMotion.js';
 import { PowerUpArt, RARITY } from './powerupArt.jsx';
+import Admin, { useAdminSummary } from './Admin.jsx';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -277,9 +278,13 @@ function Signed() {
   const [tab, setTab] = useState('today');
   const [sheet, setSheet] = useState(null);
   const [feedback, setFeedback] = useState(false);
+  const [reporting, setReporting] = useState(null);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [toast, setToast] = useState('');
   const now = useNow(1000);
   const meId = d && d.me && d.me.id;
+  const [adminSummary, refreshAdmin] = useAdminSummary(meId);
+  const adminCount = adminSummary ? adminSummary.pending + adminSummary.reports + adminSummary.feedback : 0;
 
   // Join the group from an invite link once the profile exists.
   useEffect(() => {
@@ -318,29 +323,44 @@ function Signed() {
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
           <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.unlimited ? '∞ slashes' : `${d.me.credits} ${d.me.credits === 1 ? 'slash' : 'slashes'}`}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
+          {adminSummary && (
+            <button className="pill" aria-pressed={adminOpen} onClick={() => { setAdminOpen(!adminOpen); setSheet(null); refreshAdmin(); }}>
+              Admin{adminCount > 0 && ` (${adminCount})`}
+            </button>
+          )}
         </div>
       </header>
       {toast && <div className="note toast" role="status" onClick={() => setToast('')}>{toast}</div>}
-      <main className="screen" key={tab}>
+      {adminOpen && adminSummary ? (
+        <main className="screen" key="admin">
+          <Admin summary={adminSummary} onChanged={() => { refreshAdmin(); reload(); }} onClose={() => setAdminOpen(false)}
+            themes={[...new Set(d.questions.filter(q => q.audience !== 'friends').map(q => q.category))].sort()} />
+        </main>
+      ) : <main className="screen" key={tab}>
         {tab === 'today' && <Today {...ctx} />}
         {tab === 'questions' && <Questions {...ctx} />}
         {tab === 'predict' && (d.futureUnlocked ? <Predict {...ctx} /> : <FutureLocked {...ctx} />)}
         {tab === 'friends' && <Friends {...ctx} />}
         {tab === 'profile' && <Profile {...ctx} />}
-      </main>
+      </main>}
       <nav className="nav" aria-label="Main">
         {TABS.map(([k, ico, label]) => (
-          <button key={k} aria-current={tab === k ? 'page' : 'false'} onClick={() => { setTab(k); setSheet(null); }}>
+          <button key={k} aria-current={!adminOpen && tab === k ? 'page' : 'false'} onClick={() => { setTab(k); setSheet(null); setAdminOpen(false); }}>
             <span className="ico"><Px name={ico} /></span>{label}
             {k === 'friends' && inbox.length > 0 && <span className="badge">{inbox.length}</span>}
           </button>
         ))}
       </nav>
       {feedback && <FeedbackSheet tab={tab} onClose={() => setFeedback(false)} />}
+      {reporting && <ReportSheet q={reporting} onClose={() => setReporting(null)} />}
       {sheet && d.byId[sheet] && (
         <div className="scrim" onClick={e => e.target === e.currentTarget && setSheet(null)}>
           <div className="sheet" role="dialog" aria-modal="true">
-            <div className="sheet-top"><button className="close" onClick={() => setSheet(null)}>Close</button></div>
+            <div className="sheet-top" style={{ gap: 8 }}>
+              {d.byId[sheet].created_by !== d.me.id && !d.byId[sheet].is_event
+                && <button className="close" onClick={() => { setReporting(d.byId[sheet]); setSheet(null); }}>Report</button>}
+              <button className="close" onClick={() => setSheet(null)}>Close</button>
+            </div>
             {shared && shared.id === sheet && <SharedBy shared={shared} setShared={setShared} d={d} />}
             <QuestionCard q={d.byId[sheet]} small {...ctx} />
           </div>
@@ -1793,6 +1813,32 @@ function Groups({ d, reload, open, view }) {
         </details>
       )}
       {d.me.is_adult && d.groups.length < 5 && <details><summary className="hint">Make another group</summary>{makeForm}</details>}
+    </div>
+  );
+}
+
+// Report a question: it goes to the admin inbox with the question attached.
+function ReportSheet({ q, onClose }) {
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+  async function submit(e) {
+    e.preventDefault(); setError('');
+    try { await call('report', { p_reason: text.trim(), p_question: q.id }); setSent(true); }
+    catch (err) { setError(err.message); }
+  }
+  return (
+    <div className="scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+      <form className="sheet" role="dialog" aria-modal="true" aria-label="Report a question" onSubmit={submit}>
+        <div className="sheet-top"><button type="button" className="close" onClick={onClose}>Close</button></div>
+        <h2>Report this question</h2>
+        <p className="hint">"{q.text}"</p>
+        <p className="hint">Tell us what's wrong: offensive, unfair, a duplicate, badly worded. Only the yeah/nah team sees this, along with the question.</p>
+        {!sent && <label className="field"><span className="label">What's wrong with it</span>
+          <textarea required minLength={3} maxLength={500} rows={4} value={text} onChange={e => setText(e.target.value)} /></label>}
+        <Msg error={error} note={sent && 'Thanks, we\'ll take a look.'} />
+        {!sent && <button className="solid">Send report</button>}
+      </form>
     </div>
   );
 }
