@@ -46,7 +46,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up and effect cards, unlimited slashes for the owner's account) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up and effect cards, unlimited slashes for the owner's account, friend requests from question links) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 

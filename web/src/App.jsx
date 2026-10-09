@@ -354,16 +354,25 @@ function Signed() {
 function SharedBy({ shared, setShared, d }) {
   const [error, setError] = useState('');
   if (!shared.by || shared.by_id === d.me.id) return null;
-  async function follow() {
-    const { error: e } = await supabase.from('follows').insert({ follower: d.me.id, followed: shared.by_id });
-    if (e) setError(e.message); else setShared({ ...shared, following: true });
+  async function follow(on) {
+    setError('');
+    const { error: e } = on
+      ? await supabase.from('follows').insert({ follower: d.me.id, followed: shared.by_id })
+      : await supabase.from('follows').delete().eq('follower', d.me.id).eq('followed', shared.by_id);
+    if (e) setError(e.message); else setShared({ ...shared, following: on, requested: false, undone: !on });
   }
+  // Opening the link sends the writer a friend request (they see you under Follow back), with an undo.
   return (
     <div className="hook shared-by">
       {shared.by} shared this with you.{' '}
-      {shared.friends ? null : shared.following
+      {shared.friends ? null : shared.requested && shared.following
+        ? <>We've sent {shared.by} a friend request, so you'll be friends once they follow you back.{' '}
+            <button className="linkbtn" onClick={() => follow(false)}>Undo</button></>
+        : shared.following
         ? `Friend request sent. You'll be friends once ${shared.by} adds you back.`
-        : <button className="linkbtn" onClick={follow}>Add {shared.by} as a friend</button>}
+        : shared.undone
+        ? <>Friend request taken back. <button className="linkbtn" onClick={() => follow(true)}>Add {shared.by} as a friend</button></>
+        : <button className="linkbtn" onClick={() => follow(true)}>Add {shared.by} as a friend</button>}
       <Msg error={error} />
     </div>
   );
