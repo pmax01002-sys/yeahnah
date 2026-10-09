@@ -197,9 +197,12 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .dot[aria-current="true"] { transform: translateY(-3px); box-shadow: 2px 2px 0 var(--ink); }
 .deck-end { text-align: left; }
 .send-btn { align-self: flex-start; padding: 6px 12px; font-size: 14px; }
-.panel.send .chips { gap: 8px; }
-.panel.send .chip { font-size: 13px; padding: 2px 9px; }
-.panel.send .chip:disabled { background: transparent !important; border-style: dashed; }
+.picker { display: flex; flex-direction: column; gap: 8px; }
+.picker .chips { gap: 8px; }
+.picker .chip { font-size: 13px; padding: 2px 9px; }
+.picker .chip:disabled { background: transparent !important; border-style: dashed; }
+.make > input, .make > select { border: var(--b) solid var(--ink); background: var(--surface); border-radius: 0; padding: 8px 10px; width: 100%; }
+.make > .solid { align-self: flex-start; }
 button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
 .chip.group { border-style: dashed; }
 
