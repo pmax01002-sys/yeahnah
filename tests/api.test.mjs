@@ -406,6 +406,22 @@ test('friend questions: no approval, only friends see them, 3 slashes plus 2 per
   await fails(writer.rpc('submit_question', { p_text: 'Is cereal a soup?' }), /costs 5 slashes and you have 0/);
 });
 
+test('stars: only yours, and only on questions you can see', async () => {
+  const [a, b] = [await user('stara', '1990-06-06'), await user('starb', '1991-06-06')];
+  const q = others[3];
+  await ok(a.rpc('set_star', { p_question: q, p_on: true }));
+  await ok(a.rpc('set_star', { p_question: q, p_on: true }));
+  assert.deepEqual((await ok(a.from('stars').select('question_id'))).map(r => r.question_id), [q]);
+  assert.equal((await ok(b.from('stars').select('question_id'))).length, 0, "nobody sees someone else's stars");
+  await fails(a.from('stars').insert({ user_id: (await me(a)).id, question_id: others[4] }));
+  const pending = await ok(b.rpc('submit_question', { p_text: 'Is a jaffa cake a biscuit?' }));
+  await fails(a.rpc('set_star', { p_question: pending, p_on: true }), /not found/);
+  const text = (await ok(a.from('questions').select('text').eq('id', q).single())).text;
+  assert.deepEqual((await ok(a.rpc('export_my_data'))).starred_questions.map(r => r.text), [text]);
+  await ok(a.rpc('set_star', { p_question: q, p_on: false }));
+  assert.equal((await ok(a.from('stars').select('question_id'))).length, 0);
+});
+
 test('feedback lands in a table only its author (and the owner) can read', async () => {
   await ok(bob.rpc('submit_feedback', { p_body: 'Love the flat Earth one', p_context: 'today' }));
   await fails(bob.from('feedback').insert({ body: 'x' }));

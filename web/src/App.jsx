@@ -180,7 +180,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -189,6 +189,7 @@ function useData() {
       supabase.from('groups').select('id,name,invite_code,created_by').order('created_at'),
       supabase.from('group_members').select('group_id,user_id').order('joined_at'),
       supabase.from('app_config').select('key,value'),
+      supabase.from('stars').select('question_id'),
     ]);
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
@@ -206,6 +207,7 @@ function useData() {
     setD({
       me,
       cfg: Object.fromEntries((config.data || []).map(c => [c.key, c.value])),
+      stars: new Set((stars.data || []).map(s => s.question_id)),
       questions: questions.data,
       byId: Object.fromEntries(questions.data.map(q => [q.id, q])),
       mine: Object.fromEntries(mine.data.map(s => [s.question_id, s])),
@@ -421,6 +423,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
     <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}`}>
       <Chips q={q}>
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
+        {starrable(q) && (deck ? d.stars.has(q.id) : !mine || d.stars.has(q.id)) && <StarToggle q={q} d={d} reload={reload} chip />}
         {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
           : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question' : `By ${d.person[q.created_by]?.display_name || 'a friend'}`}</span>}
         {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {left(challenge.expires_at, now)}</span>}
@@ -511,13 +514,37 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
   );
 }
 
-function Row({ q, d, open, extra }) {
+function Row({ q, d, open, extra, reload, star }) {
   const mine = d.mine[q.id];
   const locked = q.sensitivity === 'sensitive' && !d.me.sensitive_opt_in;
-  return (
+  const row = (
     <button className="row" onClick={() => open(q.id)}>
       <span><span className="t">{q.text}</span><Chips q={q}>{extra}</Chips></span>
       <span>{locked ? <Px name="lock" label="Locked" /> : mine ? <Pill q={q} v={mine.value} /> : null}</span>
+    </button>
+  );
+  return star && starrable(q) ? <div className="row-star">{row}<StarToggle q={q} d={d} reload={reload} /></div> : row;
+}
+
+// Starred questions you haven't answered are dealt into Today first. Questions
+// written for friends and world events aren't dealt, so they can't be starred.
+const starrable = q => q.audience !== 'friends' && !q.is_event;
+function StarToggle({ q, d, reload, chip }) {
+  const [on, setOn] = useState(d.stars.has(q.id));
+  const [error, setError] = useState('');
+  useEffect(() => setOn(d.stars.has(q.id)), [d.stars, q.id]);
+  async function toggle(e) {
+    e.stopPropagation();
+    const next = !on;
+    setOn(next); setError('');
+    try { await call('set_star', { p_question: q.id, p_on: next }); await reload(); }
+    catch (err) { setOn(!next); setError(err.message); }
+  }
+  const label = on ? 'Starred' : 'Star';
+  return (
+    <button className={chip ? 'chip star' : 'star-btn'} aria-pressed={on} onClick={toggle}
+      aria-label={chip ? undefined : `Star: ${q.text}`} title={error || (on ? 'Starred: comes up first in Today' : 'Star it to get it in Today')}>
+      <Px name={on ? 'star-on' : 'star'} />{chip && ` ${label}`}
     </button>
   );
 }
@@ -556,9 +583,11 @@ function interleave(qs) {
 // Questions that can be dealt: approved, unanswered, not today's or a future
 // daily, and sensitive ones only if you've opted in.
 function dealable(d, today, skip) {
-  return interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && q.audience !== 'friends' && !d.mine[q.id]
+  const ids = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && q.audience !== 'friends' && !d.mine[q.id]
     && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
     && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in))).map(q => q.id);
+  // Starred ones come first.
+  return [...ids.filter(id => d.stars.has(id)), ...ids.filter(id => !d.stars.has(id))];
 }
 
 // Today's hand is kept on this device, so it survives tab switches and reloads.
@@ -612,7 +641,22 @@ function Today(ctx) {
   const q = d.byId[hand.ids[hand.i]];
   const counts = id => id === daily?.id || inboxIds.includes(id);
   const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
-  const swappable = hand.ids.filter(id => !d.mine[id] && id !== daily?.id && !fromFriend(id));
+  // Today's question, friends' questions and starred ones stay put until answered.
+  const canSwap = id => !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
+  const swappable = hand.ids.filter(canSwap);
+  // Questions starred since the hand was dealt take the place of unstarred,
+  // unanswered cards, starting from the back and never the card on top.
+  useEffect(() => {
+    setHand(h => {
+      const want = dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id));
+      if (!want.length) return h;
+      const ids = [...h.ids];
+      for (let k = ids.length - 1; k >= 0 && want.length; k--) {
+        if (k !== h.i && canSwap(ids[k])) ids[k] = want.shift();
+      }
+      return ids.join() === h.ids.join() ? h : { ...h, ids, seen: [...new Set([...h.seen, ...ids])] };
+    });
+  }, [[...d.stars].join()]);
   const done = hand.ids.filter(id => d.mine[id]).length;
 
   const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
@@ -705,7 +749,7 @@ function Questions(ctx) {
   const [filter, setFilter] = useState('all');
   const [theme, setTheme] = useState(null);
   const sent = new Set(inbox.map(c => c.question_id));
-  const F = { all: 'All', open: 'Not answered', sent: 'Sent to you', standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive' };
+  const F = { all: 'All', open: 'Not answered', starred: 'Starred', sent: 'Sent to you', standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive' };
   const qs = d.questions.filter(q => !q.is_event && q.status === 'approved');
   const byTheme = {};
   for (const q of qs) {
@@ -715,7 +759,9 @@ function Questions(ctx) {
   }
   const themes = Object.values(byTheme).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
   const list = qs.filter(q => (!theme || q.category === theme)
-    && (filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)));
+    && (filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'starred' ? d.stars.has(q.id)
+      : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)));
+  const starredOpen = qs.filter(q => d.stars.has(q.id) && !d.mine[q.id]).length;
   const picked = byTheme[theme];
   return (
     <>
@@ -736,8 +782,11 @@ function Questions(ctx) {
         {picked
           ? <>{picked.name}: {picked.done} of {picked.total} answered · showing {list.length} · <button className="linkbtn" onClick={() => setTheme(null)}>All themes</button></>
           : <>{Object.keys(d.mine).length} answered · showing {list.length}</>}
+        <br />{starredOpen
+          ? `${starredOpen} starred to answer. They're dealt into Today first.`
+          : 'Star a question to get it in your Today hand.'}
       </p>
-      <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} />)}</div>
+      <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} star />)}</div>
       <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
     </>
   );
