@@ -993,23 +993,44 @@ function Today(ctx) {
   // Today's question, questions friends sent and starred ones stay put until answered.
   const canSwap = id => id !== PU && !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
   const swappable = hand.ids.filter(canSwap);
-  // Questions friends wrote and questions starred since the hand was dealt take the
-  // place of other unanswered cards, starting from the back and never the card on top.
+  // Cards come up in this order: today's question, questions friends wrote (free,
+  // so they're extra cards right after the one on top), starred ones, then the rest.
+  // Questions starred since the hand was dealt take the place of the next other
+  // unanswered cards, never the card on top.
   const friendQs = d.questions.filter(x => x.audience === 'friends' && !d.mine[x.id]).map(x => x.id);
   useEffect(() => {
     setHand(h => {
-      const want = [
-        ...dealable(d, today, new Set([...h.ids, ...h.seen])).filter(byFriend),
-        ...dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id) && !byFriend(id)),
-      ];
-      if (!want.length) return h;
+      const friends = dealable(d, today, new Set([...h.ids, ...h.seen])).filter(byFriend);
+      const starred = dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id) && !byFriend(id));
+      if (!friends.length && !starred.length) return h;
       const ids = [...h.ids];
-      for (let k = ids.length - 1; k >= 0 && want.length; k--) {
-        if (k !== h.i && canSwap(ids[k]) && !byFriend(ids[k])) ids[k] = want.shift();
+      ids.splice(Math.min(h.i + 1, ids.length), 0, ...friends);
+      for (let s = 1; s < ids.length && starred.length; s++) {
+        const k = (h.i + s) % ids.length;
+        if (canSwap(ids[k]) && !byFriend(ids[k])) ids[k] = starred.shift();
       }
       return ids.join() === h.ids.join() ? h : { ...h, ids, seen: [...new Set([...h.seen, ...ids])] };
     });
   }, [[...d.stars].join(), friendQs.join()]);
+  // The hand never holds more cards that use up an answer than you have answers
+  // left: starred ones are kept over the rest, and the others come back another
+  // day. Once your answers are gone, what's left is what you've answered and
+  // what's free (today's question, and questions friends wrote or sent you).
+  const answersLeft = Math.max(d.me.other_answers_left_today, 0);
+  const paid = id => id !== PU && d.byId[id] && !d.mine[id] && !counts(id);
+  useEffect(() => {
+    setHand(h => {
+      const cards = h.ids.filter(paid);
+      if (cards.length <= answersLeft) return h;
+      const keep = new Set([...cards.filter(id => d.stars.has(id)), ...cards.filter(id => !d.stars.has(id))].slice(0, answersLeft));
+      const ids = h.ids.filter(id => !paid(id) || keep.has(id));
+      // Stay on the same card, or the next one still in the hand.
+      let k = h.i;
+      while (k < h.ids.length && !ids.includes(h.ids[k])) k++;
+      const i = k < h.ids.length ? ids.indexOf(h.ids[k]) : 0;
+      return { ...h, ids, i: Math.max(0, Math.min(i, ids.length - 1)) };
+    });
+  }, [answersLeft, hand.ids.join(), Object.keys(d.mine).length, [...d.stars].join()]);
   const done = hand.ids.filter(id => d.mine[id]).length;
 
   const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
@@ -1090,7 +1111,7 @@ function Today(ctx) {
           </div>
           <div className="deck-nav">
             <span className="hint">{note || 'Swipe left for the next card, right to go back.'}</span>
-            <button className="ghost" onClick={reshuffle} disabled={!swappable.length}><Px name="shuffle" /> Shuffle</button>
+            {answersLeft > 0 && <button className="ghost" onClick={reshuffle} disabled={!swappable.length}><Px name="shuffle" /> Shuffle</button>}
           </div>
         </>
       )}
