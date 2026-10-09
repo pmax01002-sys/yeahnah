@@ -1,0 +1,9 @@
+{
+  "appId": "app.yeahnah",
+  "appName": "yeah/nah",
+  "webDir": "dist",
+  "backgroundColor": "#FF6EC7",
+  "ios": {
+    "contentInset": "always"
+  }
+}

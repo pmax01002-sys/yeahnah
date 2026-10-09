@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
+import { isNative, siteUrl, shareLink, onLinkOpened } from './native.js';
 import { Px } from './icons.jsx';
 import { useDeckMotion } from './deckMotion.js';
 
@@ -52,6 +53,19 @@ function clearQuestion() {
   try { localStorage.removeItem(QUESTION_KEY); } catch { /* none */ }
 }
 pendingQuestion();
+
+// In the phone apps an invite or question link arrives as an event rather
+// than the page address: remember it and restart, so it is handled like the
+// website's.
+onLinkOpened(params => {
+  const join = params.get('join'), q = params.get('q');
+  if (!join && !q) return;
+  try {
+    if (join) localStorage.setItem(JOIN_KEY, join);
+    if (q) localStorage.setItem(QUESTION_KEY, q);
+  } catch { /* none */ }
+  window.location.reload();
+});
 
 // The question from a link, shown on the sign-up page.
 function QuestionBanner() {
@@ -154,7 +168,8 @@ function SignIn() {
     e.preventDefault();
     setBusy(true); setError(''); setNote('');
     const fn = mode === 'signin' ? 'signInWithPassword' : 'signUp';
-    const { data, error } = await supabase.auth[fn]({ email, password });
+    const options = mode === 'signup' && siteUrl ? { emailRedirectTo: siteUrl } : undefined;
+    const { data, error } = await supabase.auth[fn]({ email, password, options });
     setBusy(false);
     if (error) return setError(error.message);
     if (mode === 'signup' && !data.session) setNote('Check your email to confirm, then sign in.');
@@ -183,7 +198,11 @@ function SignIn() {
   );
 }
 
-const PrivacyLink = ({ children }) => <a href="/privacy.html" target="_blank" rel="noopener">{children}</a>;
+// The phone apps open the bundled notice in place (it has its own Back link),
+// since a new window has nowhere to go inside the app.
+const PrivacyLink = ({ children }) => isNative
+  ? <a href="/privacy.html">{children}</a>
+  : <a href="/privacy.html" target="_blank" rel="noopener">{children}</a>;
 
 function CreateProfile({ onDone }) {
   const [f, setF] = useState({ handle: '', name: '', birth: '' });
@@ -366,12 +385,10 @@ function ShareLink({ q }) {
   async function share() {
     setError(''); setNote('');
     try {
-      const link = url || `${window.location.origin}/?q=${await call('share_question', { p_question: q.id })}`;
+      const link = url || `${siteUrl}/?q=${await call('share_question', { p_question: q.id })}`;
       setUrl(link);
-      if (navigator.share) {
-        try { await navigator.share({ title: 'yeah/nah', text: q.text, url: link }); return; }
-        catch (e) { if (e.name === 'AbortError') return; }
-      }
+      try { if (await shareLink({ title: 'yeah/nah', text: q.text, url: link })) return; }
+      catch (e) { if (e.name === 'AbortError' || /cancel/i.test(e.message)) return; }
       try { await navigator.clipboard.writeText(link); setNote('Link copied. Paste it anywhere.'); }
       catch { setNote('Copy the link above.'); }
     } catch (e) { setError(e.message); }
@@ -1271,12 +1288,11 @@ function Groups({ d, reload, open }) {
     if (r) { setName(''); setSel(r.id); }
   }
   async function share() {
-    const link = `${window.location.origin}/?join=${g.invite_code}`;
+    const link = `${siteUrl}/?join=${g.invite_code}`;
     const text = `Join my yeah/nah group "${g.name}". One yes/no question a day, and we see how each other answered. It's an early test, so tap Feedback and tell me what you think.`;
     setError(''); setNote('');
-    if (navigator.share) {
-      try { await navigator.share({ title: 'yeah/nah', text, url: link }); return; } catch (err) { if (err.name === 'AbortError') return; }
-    }
+    try { if (await shareLink({ title: 'yeah/nah', text, url: link })) return; }
+    catch (err) { if (err.name === 'AbortError' || /cancel/i.test(err.message)) return; }
     try { await navigator.clipboard.writeText(`${text} ${link}`); setNote('Invite copied. Paste it into WhatsApp or a text. Anyone with the link can join, so only send it to friends.'); }
     catch { setNote(`Send your friends this link: ${link}`); }
   }
