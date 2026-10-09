@@ -251,7 +251,7 @@ function Signed() {
         <div className="brand"><span>yeah</span>/<em>nah</em></div>
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
-          <span className="pill credits" title="Slashes: spend 3 to send a friend a question">{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
+          <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
@@ -297,15 +297,16 @@ function startingVisibility(q, d) {
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
   const v = last ? last.visibility
     : q.sensitivity === 'personal' || d.cfg.new_answers_public === 0 ? 'friends' : 'public';
-  return v === 'public' && !d.me.is_adult ? 'friends' : v;
+  return v === 'public' && (!d.me.is_adult || q.audience === 'friends') ? 'friends' : v;
 }
 
-function VisibilityPicker({ d, value, onChange, label }) {
+// Answers to a friend question never go public, and nor do under-18s' answers.
+function VisibilityPicker({ q, d, value, onChange, label }) {
   return (
     <>
       <span className="label">{label}</span>
       <div className="seg" role="group" aria-label="Visibility">
-        {['public', 'friends', 'private'].filter(v => d.me.is_adult || v !== 'public').map(v => (
+        {['public', 'friends', 'private'].filter(v => v !== 'public' || (d.me.is_adult && q.audience !== 'friends')).map(v => (
           <button key={v} aria-pressed={value === v} onClick={() => onChange(v)}>{v[0].toUpperCase() + v.slice(1)}</button>
         ))}
       </div>
@@ -313,9 +314,9 @@ function VisibilityPicker({ d, value, onChange, label }) {
   );
 }
 
-// Green for a question a friend sent you, pink for today's question.
+// Green for a question written for friends or sent by a friend, pink for today's question.
 function tintOf(q, d) {
-  if (d.challenges.some(c => c.to_user === d.me.id && c.question_id === q.id)) return ' friend';
+  if (q.audience === 'friends' || d.challenges.some(c => c.to_user === d.me.id && c.question_id === q.id)) return ' friend';
   return q.daily_date === todayUK() ? ' daily' : '';
 }
 
@@ -359,7 +360,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
       : [[true, null, 'Yeah'], [false, null, 'Nah']];
     body = (
       <>
-        <VisibilityPicker d={d} value={vis} onChange={setVis} label="Who sees your answer" />
+        <VisibilityPicker q={q} d={d} value={vis} onChange={setVis} label="Who sees your answer" />
         <div className={`answer-row${deck ? ' halves' : ''}`}>
           {opts.map(([v, emoji, label]) => (
             <button key={label} className={`big ${q.option_yes ? 'pick' : v ? 'yes' : 'no'}`}
@@ -400,7 +401,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
           <p className="hint">Seen by {mine.visibility === 'public' ? 'everyone' : mine.visibility === 'friends' ? 'your friends' : 'only you'}.{' '}
             <button className="linkbtn" onClick={() => open(q.id)}>Change</button></p>
         ) : (
-          <VisibilityPicker d={d} value={mine.visibility} label="Who sees this answer on your profile"
+          <VisibilityPicker q={q} d={d} value={mine.visibility} label="Who sees this answer on your profile"
             onChange={v => act('set_visibility', { p_question: q.id, p_visibility: v })} />
         )}
         {!deck && !mine.verified && (d.me.changes_left_today > 0
@@ -418,7 +419,8 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
     <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}`}>
       <Chips q={q}>
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
-        {sentBy && <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>}
+        {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
+          : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question' : `By ${d.person[q.created_by]?.display_name || 'a friend'}`}</span>}
         {challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
@@ -429,7 +431,39 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
   );
 }
 
-// Send a question you've answered to friends: pick people one by one, or a whole group at once.
+// Pick friends one by one, or a whole group at once. blocked(handle) gives a
+// reason someone can't be picked, such as having answered already.
+function FriendPicker({ d, picked, setPicked, blocked = () => '' }) {
+  const friends = d.friends.filter(Boolean);
+  const groups = d.groups
+    .map(g => ({ ...g, handles: g.members.map(id => d.person[id]?.handle).filter(h => h && friends.some(f => f.handle === h) && !blocked(h)) }))
+    .filter(g => g.handles.length);
+  const toggle = h => setPicked(p => (p.includes(h) ? p.filter(x => x !== h) : [...p, h]));
+  const toggleGroup = g => setPicked(p => (g.handles.every(h => p.includes(h))
+    ? p.filter(h => !g.handles.includes(h)) : [...new Set([...p, ...g.handles])]));
+  return (
+    <div className="picker">
+      {groups.length > 0 && (
+        <div className="chips">
+          {groups.map(g => (
+            <button type="button" key={g.id} className="chip group" aria-pressed={g.handles.every(h => picked.includes(h))} onClick={() => toggleGroup(g)}>
+              Everyone in {g.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="chips">
+        {friends.map(f => (
+          <button type="button" key={f.handle} className="chip" aria-pressed={picked.includes(f.handle)} disabled={!!blocked(f.handle)} onClick={() => toggle(f.handle)}>
+            {f.display_name}{blocked(f.handle) ? ` · ${blocked(f.handle)}` : ''}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Send a question you've answered to friends.
 function SendPanel({ q, d, reload, friendAns, onClose }) {
   const cost = d.cfg.send_cost ?? 2;
   const [picked, setPicked] = useState([]);
@@ -437,17 +471,10 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const friends = d.friends.filter(Boolean);
-  const nameOf = h => friends.find(f => f.handle === h)?.display_name || h;
+  const nameOf = h => d.friends.find(f => f && f.handle === h)?.display_name || h;
   const answered = new Set(friendAns.map(f => f.handle));
   const sent = new Set(d.challenges.filter(c => c.from_user === d.me.id && c.question_id === q.id).map(c => d.person[c.to_user]?.handle));
-  const canGet = h => !answered.has(h) && !sent.has(h);
-  const groups = d.groups
-    .map(g => ({ ...g, handles: g.members.map(id => d.person[id]?.handle).filter(h => h && friends.some(f => f.handle === h) && canGet(h)) }))
-    .filter(g => g.handles.length);
-  const toggle = h => setPicked(p => (p.includes(h) ? p.filter(x => x !== h) : [...p, h]));
-  const toggleGroup = g => setPicked(p => (g.handles.every(h => p.includes(h))
-    ? p.filter(h => !g.handles.includes(h)) : [...new Set([...p, ...g.handles])]));
+  const blocked = h => (answered.has(h) ? 'answered' : sent.has(h) ? 'sent' : '');
   const total = picked.length * cost;
 
   async function send() {
@@ -466,22 +493,7 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
   return (
     <div className="panel send">
       <span className="label">Send to friends: {cost} slashes each. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
-      {groups.length > 0 && (
-        <div className="chips">
-          {groups.map(g => (
-            <button key={g.id} className="chip group" aria-pressed={g.handles.every(h => picked.includes(h))} onClick={() => toggleGroup(g)}>
-              Everyone in {g.name}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="chips">
-        {friends.map(f => (
-          <button key={f.handle} className="chip" aria-pressed={picked.includes(f.handle)} disabled={!canGet(f.handle)} onClick={() => toggle(f.handle)}>
-            {f.display_name}{answered.has(f.handle) ? ' · answered' : sent.has(f.handle) ? ' · sent' : ''}
-          </button>
-        ))}
-      </div>
+      <FriendPicker d={d} picked={picked} setPicked={setPicked} blocked={blocked} />
       <div className="seg" role="group" aria-label="Timer">
         {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
       </div>
@@ -542,7 +554,7 @@ function interleave(qs) {
 // Questions that can be dealt: approved, unanswered, not today's or a future
 // daily, and sensitive ones only if you've opted in.
 function dealable(d, today, skip) {
-  return interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
+  return interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && q.audience !== 'friends' && !d.mine[q.id]
     && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
     && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in))).map(q => q.id);
 }
@@ -718,6 +730,7 @@ const THEME_EMOJI = {
   Sport: '⚽', Music: '🎵', 'Film & TV': '🎬', Travel: '✈️', Work: '💼', Dating: '💘', Food: '🍕',
   Mysteries: '🛸', Future: '🚀', Nostalgia: '📼', Brands: '🏷️', 'Big debates': '🔥', Beliefs: '✨',
   Ethics: '⚖️', Fitness: '🏃', Lifestyle: '🛋️', Money: '💷', Politics: '🗳️', Tech: '💻', 'Wild cards': '🃏',
+  Friends: '👯',
 };
 
 function Questions(ctx) {
@@ -758,25 +771,85 @@ function Questions(ctx) {
           : <>{Object.keys(d.mine).length} answered · showing {list.length}</>}
       </p>
       <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} />)}</div>
-      <SuggestQuestion />
+      <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
     </>
   );
 }
 
-function SuggestQuestion() {
+// Write a question. For friends it's live straight away and goes to the friends
+// you pick; for everyone it waits for a moderator.
+function MakeQuestion({ d, reload, themes }) {
+  const [kind, setKind] = useState('friends');
   const [text, setText] = useState('');
+  const [value, setValue] = useState(null);
+  const [picked, setPicked] = useState([]);
+  const [timer, setTimer] = useState(1440);
+  const [theme, setTheme] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const fq = d.cfg.friend_question_cost ?? 3, each = d.cfg.send_cost ?? 2, pub = d.cfg.public_question_cost ?? 5;
+  const forFriends = kind === 'friends';
+  const cost = forFriends ? fq + each * Math.max(picked.length - 1, 0) : pub;
+  const waiting = d.questions.filter(q => q.created_by === d.me.id && q.status === 'pending');
+  const ready = text.trim().length >= 5 && (!forFriends || (value !== null && picked.length > 0));
+  const nameOf = h => d.friends.find(f => f && f.handle === h)?.display_name || h;
+
   async function submit(e) {
-    e.preventDefault(); setError(''); setNote('');
-    try { await call('submit_question', { p_text: text }); setText(''); setNote('Thanks. A moderator checks it before it goes live.'); }
-    catch (err) { setError(err.message); }
+    e.preventDefault(); setError(''); setNote(''); setBusy(true);
+    try {
+      if (forFriends) {
+        await call('make_friend_question', { p_text: text, p_value: value, p_handles: picked, p_minutes: timer });
+        setNote(`Sent to ${picked.map(nameOf).join(', ')}. Your friends can find it under Friends too.`);
+      } else {
+        await call('submit_question', { p_text: text, p_category: theme || 'General' });
+        setNote('Thanks. A moderator checks it before it goes live for everyone.');
+      }
+      setText(''); setValue(null); setPicked([]);
+      await reload();
+    } catch (err) { setError(err.message); }
+    setBusy(false);
   }
+
   return (
-    <form className="section" onSubmit={submit}><h2>Suggest a question</h2>
-      <div className="inline"><input required minLength={5} maxLength={140} placeholder="Is cereal a soup?" value={text} onChange={e => setText(e.target.value)} />
-        <button className="ghost">Send</button></div>
+    <form className="section make" onSubmit={submit}>
+      <h2>Make a question</h2>
+      <div className="seg" role="group" aria-label="Who it's for">
+        <button type="button" aria-pressed={forFriends} onClick={() => setKind('friends')}>For friends</button>
+        <button type="button" aria-pressed={!forFriends} onClick={() => setKind('public')}>For everyone</button>
+      </div>
+      <p className="hint">{forFriends
+        ? `Only your friends can see it, so there's no approval. ${fq} slashes, which includes sending it to one friend, then ${each} for each extra friend.`
+        : `A moderator checks it before it goes live for everyone. ${pub} slashes, up to 3 a day.`}</p>
+      <input required minLength={5} maxLength={140} aria-label="Your question" value={text} onChange={e => setText(e.target.value)}
+        placeholder={forFriends ? 'Would you eat a bug for a tenner?' : 'Is cereal a soup?'} />
+      {forFriends ? (d.friends.length === 0
+        ? <p className="hint">Add friends in the Group tab first.</p>
+        : (
+          <>
+            <span className="label">Your answer</span>
+            <div className="seg" role="group" aria-label="Your answer">
+              <button type="button" aria-pressed={value === true} onClick={() => setValue(true)}>Yeah</button>
+              <button type="button" aria-pressed={value === false} onClick={() => setValue(false)}>Nah</button>
+            </div>
+            <span className="label">Send it to</span>
+            <FriendPicker d={d} picked={picked} setPicked={setPicked} />
+            <div className="seg" role="group" aria-label="Timer">
+              {TIMERS.map(([m, l]) => <button type="button" key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
+            </div>
+          </>
+        )) : (
+        <select value={theme} onChange={e => setTheme(e.target.value)} aria-label="Theme">
+          <option value="">Pick a theme (optional)</option>
+          {themes.map(t => <option key={t}>{t}</option>)}
+        </select>
+      )}
+      <button className="solid" disabled={!ready || busy || cost > d.me.credits}>
+        {busy ? 'Sending…' : forFriends ? `Make and send · ${cost} slashes` : `Send for review · ${cost} slashes`}
+      </button>
+      {cost > d.me.credits && <p className="hint">You have {d.me.credits} slashes. Answering a friend's question in time earns {d.cfg.challenge_reward ?? 2}.</p>}
       <Msg error={error} note={note} />
+      {waiting.length > 0 && <p className="hint">Waiting for a moderator: {waiting.map(q => `"${q.text}"`).join(', ')}</p>}
     </form>
   );
 }

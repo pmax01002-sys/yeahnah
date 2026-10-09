@@ -181,14 +181,14 @@ test('nobody can list strangers; finding an exact handle still works', async () 
   await ok(stranger.rpc('delete_my_account'));
 });
 
-test('sending a question costs 3 slashes; answering in time earns 2 and skips the daily limit', async () => {
+test('sending a question costs 2 slashes; answering in time earns 2 and skips the daily limit', async () => {
   const q = others[6];
   await fails(bob.rpc('send_challenge', { p_handle: tia.handle, p_question: q, p_minutes: 60 }), /friends/);
   await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 60 }), /yourself first/);
   await ok(bob.rpc('answer', { p_question: q, p_value: true }));
   await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 5 }), /1 minute, 1 hour or 1 day/);
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 60 }));
-  assert.equal((await me(bob)).credits, 7);
+  assert.equal((await me(bob)).credits, 8);
   // Alice is out of answers today, but a friend's question still goes through.
   await ok(alice.rpc('answer', { p_question: q, p_value: true }));
   assert.equal((await me(alice)).credits, 12);
@@ -197,13 +197,15 @@ test('sending a question costs 3 slashes; answering in time earns 2 and skips th
   // Her last visibility choice (private) carried over to this answer.
   const v = await ok(alice.from('statements').select('visibility').eq('question_id', q).eq('user_id', (await me(alice)).id));
   assert.deepEqual(v, [{ visibility: 'private' }]);
-  // Slashes run out: 7 -> 4 -> 1, then refused.
+  // Slashes run out: 8 -> 6 -> 4, down to 1, then refused.
   await ok(bob.rpc('answer', { p_question: others[7], p_value: true }));
   await ok(bob.rpc('answer', { p_question: others[8], p_value: true }));
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[7], p_minutes: 1440 }));
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 1 }));
-  assert.equal((await me(bob)).credits, 1);
-  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 3 slashes/);
+  assert.equal((await me(bob)).credits, 4);
+  await ok(admin.from('credit_ledger').insert({ user_id: (await me(bob)).id, amount: -3, reason: 'test' }));
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 2 slashes/);
+  await ok(admin.from('credit_ledger').insert({ user_id: (await me(bob)).id, amount: 3, reason: 'test' }));
 });
 
 test('predictions are free and build a hit rate', async () => {
@@ -360,6 +362,48 @@ test('leaving or being removed from a group ends the friendships it made', async
   assert.equal(await friends(m2, host), true, 'still friends through the other group');
   await fails(m2.rpc('join_group', { p_code: g.invite_code }), /removed/);
   await fails(m2.rpc('group_board', { p_group: g.id }), /not in that group/);
+});
+
+test('friend questions: no approval, only friends see them, 3 slashes plus 2 per extra friend', async () => {
+  const id = async c => (await me(c)).id;
+  const [writer, pal1, pal2, outsider] = [await user('writer', '1990-04-04'), await user('pal1', '1991-04-04'),
+    await user('pal2', '1992-04-04'), await user('outsider', '1993-04-04')];
+  const g = await ok(writer.rpc('create_group', { p_name: 'Quiz' }));
+  for (const c of [pal1, pal2]) await ok(c.rpc('join_group', { p_code: g.invite_code }));
+  // The outsider is friends with pal1 only.
+  await ok(outsider.from('follows').insert({ follower: await id(outsider), followed: await id(pal1) }));
+  await ok(pal1.from('follows').insert({ follower: await id(pal1), followed: await id(outsider) }));
+  const before = await me(writer);
+
+  await fails(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [] }), /at least one friend/);
+  await fails(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [outsider.handle] }), /only send questions to friends/);
+  const q = await ok(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [pal1.handle, pal2.handle] }));
+  const after1 = await me(writer);
+  assert.equal(before.credits - after1.credits, 5, '3 for the question and first friend, 2 for the second');
+  assert.equal(after1.other_answers_left_today, before.other_answers_left_today, "the writer's own answer is outside the daily five");
+
+  const row = await ok(pal1.from('questions').select('status,audience,category').eq('id', q));
+  assert.deepEqual(row, [{ status: 'approved', audience: 'friends', category: 'Friends' }]);
+  assert.equal((await ok(outsider.from('questions').select('id').eq('id', q))).length, 0, 'not friends with the writer');
+  await fails(outsider.rpc('answer', { p_question: q, p_value: true }), /not found/);
+
+  // Answers never go public, and answering in time earns the reward.
+  const pal1Before = (await me(pal1)).credits;
+  await ok(pal1.rpc('answer', { p_question: q, p_value: false, p_visibility: 'public' }));
+  const s = await ok(pal1.from('statements').select('visibility,via_challenge').eq('question_id', q).eq('user_id', await id(pal1)));
+  assert.deepEqual(s, [{ visibility: 'friends', via_challenge: true }]);
+  assert.equal((await me(pal1)).credits, pal1Before + 2);
+  await fails(pal1.rpc('set_visibility', { p_question: q, p_visibility: 'public' }), /stay with friends/);
+  assert.deepEqual(await ok(pal1.rpc('question_split', { p_question: q })), { yes: 1, no: 1, total: 2 });
+  // pal1 can't pass it on to someone who isn't the writer's friend.
+  await fails(pal1.rpc('send_challenge', { p_handle: outsider.handle, p_question: q, p_minutes: 60 }), /friends of the person who wrote it/);
+
+  // Public questions still wait for a moderator, and cost 5 slashes.
+  const pq = await ok(writer.rpc('submit_question', { p_text: 'Is a hot dog a sandwich?', p_category: 'Food' }));
+  assert.equal((await me(writer)).credits, after1.credits - 5);
+  assert.deepEqual(await ok(writer.from('questions').select('status,audience,category').eq('id', pq)), [{ status: 'pending', audience: 'public', category: 'Food' }]);
+  assert.equal((await ok(pal1.from('questions').select('id').eq('id', pq))).length, 0, 'nobody else sees it before approval');
+  await fails(writer.rpc('submit_question', { p_text: 'Is cereal a soup?' }), /costs 5 slashes and you have 0/);
 });
 
 test('feedback lands in a table only its author (and the owner) can read', async () => {
