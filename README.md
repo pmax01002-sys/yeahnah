@@ -6,7 +6,7 @@ prototype's rules enforced on the server. It runs on free tiers.
 ```
 web/       the app people use (React, built to a static site)
 supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     20 end-to-end checks of the rules, run through the same API the app uses
+tests/     21 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
@@ -20,6 +20,7 @@ tests/     20 end-to-end checks of the rules, run through the same API the app u
 - **Friends** are people who follow each other. Send a friend a question for 3 credits with a 1 minute, 1 hour or 1 day timer; they earn 2 credits for answering in time, and it doesn't use up their daily 5. Everyone starts with 10 credits.
 - **Friend groups**: make a group, tap Invite friends and send the link. Whoever signs up through it joins the group and becomes friends with everyone in it. The Group tab shows, per question, how each member answered, once you've answered it yourself. Private answers stay hidden. Groups are 18+ in the demo. Anyone with the invite link can join, so it's for sending to friends. Leaving a group ends the friendships it made, and whoever made the group can remove someone, who then can't rejoin with the link.
 - **Finding people**: you can only see the profiles of people you're connected to (friends, followers, your groups). To add someone new, type their exact handle.
+- **Avatars**: each person's pick is saved with `set_avatar('cap-red')` and shown to anyone who can see their name. The picker comes with the retro restyle.
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
 - **Suggest a question**, which waits for a moderator.
@@ -45,7 +46,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds all three later updates (18+ and themes, the privacy fixes, the complete data download) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 

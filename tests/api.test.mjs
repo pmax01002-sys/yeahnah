@@ -249,6 +249,20 @@ test('partner apps write verified answers from the server only', async () => {
   assert.deepEqual(s, [{ value: true, source: 'strava', verified: true }]);
 });
 
+test('avatars: pick one, and friends see it', async () => {
+  await ok(alice.rpc('set_avatar', { p_avatar: 'owl-red' }));
+  assert.equal((await me(alice)).avatar, 'owl-red');
+  await fails(alice.rpc('set_avatar', { p_avatar: '<img src=x>' }), /Pick one/);
+  await fails(alice.from('profiles').update({ avatar: 'fox-blue' }).eq('handle', alice.handle).select().single());
+  assert.deepEqual(await ok(bob.from('profiles').select('avatar').eq('handle', alice.handle)), [{ avatar: 'owl-red' }]);
+  assert.equal((await ok(bob.rpc('profile_card', { p_handle: alice.handle }))).avatar, 'owl-red');
+  const fa = await ok(bob.rpc('friends_answers', { p_question: daily.id }));
+  assert.ok(fa.every(r => 'avatar' in r));
+  await ok(alice.rpc('set_avatar', { p_avatar: '' }));
+  assert.equal((await me(alice)).avatar, null);
+  await ok(alice.rpc('set_avatar', { p_avatar: 'owl-red' }));
+});
+
 test('download my data and delete my account', async () => {
   const data = await ok(alice.rpc('export_my_data'));
   assert.equal(data.profile.handle, alice.handle);
@@ -298,6 +312,7 @@ test('friend groups: invite link, everyone becomes friends, answers per question
   await ok(host.rpc('answer', { p_question: daily.id, p_value: false }));
   board = await ok(host.rpc('group_board', { p_group: g.id }));
   row = board.find(r => r.question_id === daily.id);
+  assert.ok(row.answers.every(a => 'avatar' in a));
   assert.deepEqual(row.answers.map(a => [a.name, a.value, a.me]),
     [['host', false, true], ['gina', true, false], ['gus', false, false]]);
 
