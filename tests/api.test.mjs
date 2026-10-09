@@ -208,7 +208,16 @@ test('sending a question costs 2 slashes; answering in time earns 2 and skips th
   await ok(admin.from('credit_ledger').insert({ user_id: (await me(bob)).id, amount: 3, reason: 'test' }));
 });
 
-test('predictions are free and build a hit rate', async () => {
+test('Future unlocks once for 100 slashes, then guesses are free and build a hit rate', async () => {
+  await fails(alice.rpc('predict', { p_kind: 'crowd', p_question: daily.id, p_yes: false }), /Unlock Future/);
+  await fails(alice.rpc('unlock_future'), /costs 100 slashes/);
+  for (const c of [alice, bob]) {
+    await ok(admin.from('credit_ledger').insert({ user_id: (await me(c)).id, amount: 100, reason: 'test' }));
+    await ok(c.rpc('unlock_future'));
+  }
+  await ok(alice.rpc('unlock_future'));  // already unlocked: no second charge
+  assert.equal((await me(alice)).credits, 12);
+
   await ok(alice.rpc('predict', { p_kind: 'crowd', p_question: daily.id, p_yes: false }));
   await fails(alice.rpc('predict', { p_kind: 'crowd', p_question: daily.id, p_yes: true }), /already/);
   await fails(alice.rpc('predict', { p_kind: 'crowd', p_question: others[0], p_yes: true }), /today/);
