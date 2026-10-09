@@ -734,7 +734,7 @@ function effectText(effect, cfg) {
     extra_hand: [`${n} more cards today, and ${n} more answers to go with them.`, 'They\'re dealt into your hand straight away.'],
     called_it: [`Guess how many say yeah to today's question before you vote. Within ${cfg.called_it_window ?? 5} points of everyone else wins ${cfg.called_it_prize ?? 10} slashes.`,
       'Make your guess on today\'s question card. A miss costs nothing.'],
-    wildcard: ['Turns into any other card you like.', 'Tap it in your pocket to pick what it becomes.'],
+    wildcard: ['Turns into any other card you like.', 'Tap what it becomes on this card.'],
   }[effect] || ['', ''];
 }
 // Effect cards still in your pocket, and the one used on a question.
@@ -742,14 +742,28 @@ const inPocket = (d, effect) => d.pocket.filter(r => r.effect === effect && !r.u
 const usedOn = (d, effect, qid) => d.pocket.find(r => r.effect === effect && r.used_at && r.question_id === qid);
 function PowerUpCard({ p, d, reload }) {
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const level = RARITY.indexOf(p.rarity) + 1;
   const unit = p.slashes === 1 ? 'slash' : 'slashes';
   const [does, how] = effectText(p.effect, d.cfg);
   const deal = p.effect === 'extra_hand';
+  const wild = p.effect === 'wildcard';
+  // A Wildcard is picked right here: before it's claimed, or while one kept earlier is still unused.
+  const pick = wild && (!p.claimed || inPocket(d, 'wildcard').length > 0);
   async function claim() {
     setError(''); setBusy(true);
     try { await call('claim_powerup'); await reload(); } catch (e) { setError(e.message); }
+    setBusy(false);
+  }
+  async function become(kind) {
+    setError(''); setNote(''); setBusy(true);
+    try {
+      if (!p.claimed) await call('claim_powerup');
+      const r = await call('use_power', { p_kind: 'wildcard', p_pick: kind });
+      setNote(`Your Wildcard became ${r.name}. ${r.effect ? effectText(r.effect, d.cfg)[1] : `${r.slashes} slashes added.`}`);
+    } catch (e) { setError(e.message); }
+    await reload();
     setBusy(false);
   }
   let action, after;
@@ -759,9 +773,11 @@ function PowerUpCard({ p, d, reload }) {
   } else if (deal) {
     action = `Deal ${d.cfg.extra_hand_cards ?? 3} more cards`;
     after = 'Dealt. Swipe on to play them.';
+  } else if (wild) {
+    after = 'Played.';
   } else {
     action = 'Keep it';
-    after = 'In your pocket.';
+    after = 'Kept.';
   }
   return (
     <div className={`card deck-card powerup ${p.rarity} ${p.kind}${p.claimed ? ' claimed' : ''}`}>
@@ -776,70 +792,27 @@ function PowerUpCard({ p, d, reload }) {
       <h2 className="qtext">{p.name}</h2>
       <p className="hint">{p.blurb}</p>
       {p.effect && <p className="fx">{does}</p>}
-      {p.claimed
+      {pick ? (
+        <div className="pu-pick">
+          <span className="label">Turn it into</span>
+          <div className="chips">
+            {Object.values(d.kinds).filter(x => x.effect !== 'wildcard').map(x => (
+              <button key={x.kind} className={`chip pocket-chip powerup ${x.rarity}`} onClick={() => become(x.kind)} disabled={busy}>{x.name}</button>
+            ))}
+          </div>
+        </div>
+      ) : p.claimed
         ? <p className="pu-done"><Px name="check" /> {after}</p>
         : <button className="solid pu-claim" onClick={claim} disabled={busy}>{action}</button>}
-      <p className="hint">
-        {p.effect && !deal ? `${how} ` : ''}
-        {p.claimed
-          ? (p.effect && !deal ? (p.keeps_days > 1 ? `Keeps for ${p.keeps_days} days.` : 'Use it by midnight.') : 'Another power-up could turn up in a future first hand.')
-          : `${p.odds ? `${p.odds}% of power-ups are ${p.name}. ` : ''}Gone at midnight if you don't ${deal ? 'use' : p.effect ? 'keep' : 'claim'} it.`}
-      </p>
-      <Msg error={error} />
-    </div>
-  );
-}
-
-// Your pocket: effect cards you've kept and not used yet. Tap one to see what
-// it does; a Wildcard is used from here.
-function Pocket({ d, reload }) {
-  const [open, setOpen] = useState(null);
-  const [error, setError] = useState('');
-  const [note, setNote] = useState('');
-  const cards = d.pocket.filter(r => r.effect && !r.used_at && r.expires_on >= todayUK());
-  const kinds = [...new Set(cards.map(r => r.kind))];
-  if (!kinds.length && !note) return null;
-  const k = open && d.kinds[open];
-  async function become(pick) {
-    setError('');
-    try {
-      const r = await call('use_power', { p_kind: 'wildcard', p_pick: pick });
-      setOpen(null); setNote(`Your Wildcard became ${r.name}${r.effect ? '' : `: ${r.slashes} slashes added`}.`);
-      await reload();
-    } catch (e) { setError(e.message); }
-  }
-  return (
-    <div className="pocket">
-      {kinds.length > 0 && (
-        <div className="chips" aria-label="Your pocket">
-          <span className="label">Pocket</span>
-          {kinds.map(kind => {
-            const n = cards.filter(r => r.kind === kind).length;
-            return (
-              <button key={kind} className={`chip pocket-chip powerup ${d.kinds[kind].rarity}`} aria-pressed={open === kind}
-                onClick={() => { setNote(''); setError(''); setOpen(open === kind ? null : kind); }}>
-                {d.kinds[kind].name}{n > 1 ? ` ×${n}` : ''}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {k && (
-        <div className="panel">
-          <strong>{k.name}</strong>
-          <span>{effectText(k.effect, d.cfg)[0]}</span>
-          {k.effect === 'wildcard' ? (
-            <>
-              <span className="label">Turn it into</span>
-              <div className="chips">
-                {Object.values(d.kinds).filter(x => x.effect !== 'wildcard').map(x => (
-                  <button key={x.kind} className={`chip pocket-chip powerup ${x.rarity}`} onClick={() => become(x.kind)}>{x.name}</button>
-                ))}
-              </div>
-            </>
-          ) : <span className="hint">{effectText(k.effect, d.cfg)[1]}</span>}
-          <span className="hint">{cards.filter(r => r.kind === open).map(r => r.expires_on).sort()[0] > todayUK() ? 'Keeps for a few more days.' : 'Use it by midnight.'}</span>
-        </div>
+      {!note && (
+        <p className="hint">
+          {p.effect && !deal && !wild ? `${how} ` : ''}
+          {p.claimed
+            ? (pick ? 'Use it by midnight.'
+              : p.effect && !deal && !wild ? (p.keeps_days > 1 ? `Keeps for ${p.keeps_days} days.` : 'Use it by midnight.')
+              : 'Another power-up could turn up in a future first hand.')
+            : `${p.odds ? `${p.odds}% of power-ups are ${p.name}. ` : ''}Gone at midnight if you don't ${deal || wild ? 'use' : p.effect ? 'keep' : 'claim'} it.`}
+        </p>
       )}
       <Msg error={error} note={note} />
     </div>
@@ -1078,7 +1051,6 @@ function Today(ctx) {
       <div className="head">
         <span className="eyebrow">{date} · {n ? `Card ${hand.i + 1} of ${n} · ${done} answered` : 'All done'}</span>
       </div>
-      <Pocket d={d} reload={ctx.reload} />
       {!n ? (
         <div className="card deck-end">
           <h2 className="qtext">You've seen them all</h2>

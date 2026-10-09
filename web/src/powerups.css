@@ -37,6 +37,9 @@
 .powerup.claimed .pu-art { border-style: dashed; }
 .powerup.claimed .pu-art .g { color: var(--ink); text-shadow: none; animation: none; opacity: .4; }
 .powerup.claimed .pu-art .g .star { filter: none; }
+.pu-pick { display: flex; flex-direction: column; gap: 4px; }  /* the Wildcard's "Turn it into" chips, in place of the claim button */
+.pu-pick .chips { gap: 4px; }
+.pu-pick .pocket-chip { padding-block: 0; }
 .pu-claim { align-self: stretch; font-size: 18px; padding: 10px 14px; }
 .pu-done { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--display); font-weight: 600; }
 .dot.powerup { background: var(--rar); }
