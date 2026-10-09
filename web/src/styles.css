@@ -1,4 +1,14 @@
 /* Retro look: a 1-bit Mac window on a bright pink desk. Same class names as before, so only this file and the font link change. */
+/* Numbers: Pixelify's 5, 6, 8 and 9 blur together at small sizes (5 reads as S), so digits and %
+   come from Jersey 15, a pixel font with clear numerals, scaled to sit level with Pixelify's capitals. */
+@font-face {
+  font-family: "YN Digits";
+  src: url("https://fonts.gstatic.com/s/jersey15/v4/_6_9EDzuROGsUuk2TWjiZYAg.woff2") format("woff2");
+  unicode-range: U+0030-0039, U+0025;
+  size-adjust: 116%;
+  font-weight: 100 900;
+  font-display: swap;
+}
 :root {
   --desk: #FF6EC7; --dot: #D93A95;                       /* pink desk behind the app on wider screens */
   --bg: var(--desk); --frame: #FBFBF8; --surface: #FBFBF8; --ink: #141414; --muted: #141414; --line: #141414;
@@ -7,9 +17,9 @@
   --oa: #2F62C9; --ob: #B7790B; --sen: #8E3381;
   --dither: repeating-conic-gradient(var(--ink) 0 25%, var(--surface) 0 50%) 0 0 / 4px 4px;
   --stripes: repeating-linear-gradient(var(--surface) 0 3px, var(--ink) 3px 4px);
-  --display: "Pixelify Sans", "Chicago", "Geneva", ui-monospace, monospace;
+  --display: "YN Digits", "Pixelify Sans", "Chicago", "Geneva", ui-monospace, monospace;
   --body: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-  --mono: "Pixelify Sans", ui-monospace, Menlo, monospace;
+  --mono: "YN Digits", "Pixelify Sans", ui-monospace, Menlo, monospace;
   --b: 2px;
   --daily: #FFE3F3;                                       /* tint for today's question, from the desk pink */
   --friend: #DDF2E4;                                      /* tint for a question a friend sent, from the yeah green */
@@ -32,13 +42,14 @@
 html, body, #root { height: 100%; }
 body {
   margin: 0; color: var(--ink); font: 14px/1.5 var(--body); -webkit-font-smoothing: none;
+  font-variant-ligatures: no-common-ligatures;  /* Pixelify joins fi and fl into one glyph that reads as A: "Profile" showed as "ProAle" */
   background-color: var(--desk);
   background-image: radial-gradient(circle at 1px 1px, var(--dot) 0.9px, transparent 1.1px);
   background-size: 4px 4px;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
-button:disabled { cursor: not-allowed; background: var(--dither) !important; color: var(--ink) !important; opacity: .55; }
+button:disabled { cursor: not-allowed; background: var(--surface) !important; color: var(--ink) !important; border-style: dashed !important; opacity: .5; }  /* dimmed but still readable */
 :focus-visible { outline: var(--b) dashed var(--ink); outline-offset: 2px; }
 
 /* the app is one window */
@@ -225,43 +236,6 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .chip.friend { background: var(--friend); font-weight: 600; }
 .card.daily .panel, .card.friend .panel { background: transparent; }
 @media (prefers-reduced-motion: reduce) { .deck .split .y { animation: none !important; } }
-
-/* Power-up cards: one colour per rarity, from grey up to gold. */
-.powerup { --rar: #6B6B6B; }
-.powerup.uncommon { --rar: #1D7A45; }
-.powerup.rare { --rar: #2F62C9; }
-.powerup.epic { --rar: #8E3381; }
-.powerup.legendary { --rar: #B7790B; }
-:root[data-theme="phosphor"] .powerup { --rar: #5E8F55; }
-:root[data-theme="phosphor"] .powerup.uncommon { --rar: #9FF58A; }
-:root[data-theme="phosphor"] .powerup.rare { --rar: #6FD3FF; }
-:root[data-theme="phosphor"] .powerup.epic { --rar: #FF6EC7; }
-:root[data-theme="phosphor"] .powerup.legendary { --rar: #FFB35C; }
-.card.powerup .chip.rarity { background: var(--rar); color: var(--hi-ink); border-color: var(--ink); font-weight: 600; text-transform: capitalize; }
-.pips { display: inline-flex; gap: 2px; align-items: center; }
-.pips i { width: 7px; height: 7px; border: 1px solid var(--ink); background: var(--surface); }
-.pips i.on { background: var(--rar); }
-.pu-art {
-  min-height: clamp(120px, 24vh, 210px); border: var(--b) solid var(--ink); border-radius: 10px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  color: var(--hi-ink); font-family: var(--display); line-height: 1;
-  background: repeating-linear-gradient(135deg, transparent 0 10px, rgb(255 255 255 / .14) 10px 20px), var(--rar);
-}
-.pu-art .n { font-size: 68px; font-weight: 700; text-shadow: 3px 3px 0 var(--ink); }
-.pu-art .w { font-size: 16px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
-.powerup.legendary .pu-art {
-  background: linear-gradient(110deg, transparent 35%, rgb(255 246 200 / .7) 50%, transparent 65%) 0 0 / 300% 100%,
-    repeating-linear-gradient(135deg, transparent 0 10px, rgb(255 255 255 / .18) 10px 20px), var(--rar);
-  animation: pu-shine 2.6s linear infinite;
-}
-@keyframes pu-shine { from { background-position: 100% 0, 0 0, 0 0; } to { background-position: -50% 0, 0 0, 0 0; } }
-.powerup.claimed .pu-art { background: var(--dither); color: var(--ink); animation: none; }
-.powerup.claimed .pu-art .n { text-shadow: 3px 3px 0 var(--surface); }
-.pu-claim { align-self: stretch; font-size: 18px; padding: 12px 14px; }
-.pu-done { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--display); font-weight: 600; }
-.dot.powerup { background: var(--rar); }
-.dot.powerup.done { background: var(--ink); }
-@media (prefers-reduced-motion: reduce) { .powerup .pu-art { animation: none !important; } }
 
 /* pixel icons (icons.jsx): ink is currentColor; on an inverted selection the red and green go to the same ink */
 .px { display: inline-block; vertical-align: middle; flex: none; }

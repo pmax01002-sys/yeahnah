@@ -510,6 +510,27 @@ test('power-ups: drawn once a day, claimed once for slashes', async () => {
   await setPowerupChance(50);
 });
 
+test('unlimited slashes: spending is free for chosen accounts, and only the owner can give them', async () => {
+  const rich = await user('rich', '1985-09-09');
+  await fails(rich.rpc('give_unlimited_slashes', { p_handle: rich.handle }));
+  assert.equal((await me(rich)).unlimited, false);
+  await ok(admin.rpc('give_unlimited_slashes', { p_handle: rich.handle }));
+  await ok(admin.rpc('give_unlimited_slashes', { p_handle: rich.handle }));
+  let p = await me(rich);
+  assert.equal(p.unlimited, true);
+  assert.equal(p.credits, 1000, 'topped up once');
+  await ok(rich.rpc('unlock_future'));
+  await ok(rich.rpc('make_friend_question', { p_text: 'Is it ever too cold for ice cream?', p_value: false, p_handles: [] }));
+  await ok(rich.rpc('submit_question', { p_text: 'Should every town have a lido?' }));
+  p = await me(rich);
+  assert.equal(p.credits, 1000, 'spending never runs it down');
+  const spends = (await ok(rich.rpc('export_my_data'))).credits.filter(c => ['future_unlock', 'friend_question', 'suggest'].includes(c.reason));
+  assert.deepEqual(spends.map(c => c.amount), [0, 0, 0], 'spends are still recorded, at 0');
+  await ok(admin.from('unlimited_slashes').delete().eq('user_id', p.id));
+  await ok(rich.rpc('submit_question', { p_text: 'Should every town have a bandstand?' }));
+  assert.equal((await me(rich)).credits, 995);
+});
+
 test('feedback lands in a table only its author (and the owner) can read', async () => {
   await ok(bob.rpc('submit_feedback', { p_body: 'Love the flat Earth one', p_context: 'today' }));
   await fails(bob.from('feedback').insert({ body: 'x' }));

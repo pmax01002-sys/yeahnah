@@ -3,6 +3,8 @@
 -- One row per UK day in economy_days, written just after midnight for the
 -- day before, and filled in for every earlier day the first time it runs.
 -- Read it in the Supabase table editor; the app never shows it.
+-- Accounts with unlimited slashes (public.has_unlimited_slashes) are left out
+-- of every number, so the owner's testing doesn't skew them.
 --
 -- Settings it reads, in app_config (whole numbers, so 1.0 is stored as 100):
 --   slashtax_allowance      20   slashes nobody would be taxed on
@@ -53,6 +55,7 @@ begin
   -- Established = an account at least a day old with 3 or more answers by then.
   select count(*) into active from public.profiles p
    where p.created_at < d1 - interval '1 day'
+     and not public.has_unlimited_slashes(p.id)
      and (select count(*) from public.statements s where s.user_id = p.id and s.created_at < d1) >= 3
      and exists (select 1 from public.statements s where s.user_id = p.id and s.created_at >= w0 and s.created_at < d1);
 
@@ -80,8 +83,10 @@ begin
   insert into public.economy_days (day, weekly_active, answered_sends, link_joins, minted, spent, total_held,
                                    median_balance, p90_balance, over_allowance, spread, growth, v, v_is_manual)
   select p_day, active, sends, joins,
-         (select coalesce(sum(amount), 0) from public.credit_ledger where amount > 0 and created_at >= d0 and created_at < d1),
-         (select coalesce(-sum(amount), 0) from public.credit_ledger where amount < 0 and created_at >= d0 and created_at < d1),
+         (select coalesce(sum(amount), 0) from public.credit_ledger
+           where amount > 0 and created_at >= d0 and created_at < d1 and not public.has_unlimited_slashes(user_id)),
+         (select coalesce(-sum(amount), 0) from public.credit_ledger
+           where amount < 0 and created_at >= d0 and created_at < d1 and not public.has_unlimited_slashes(user_id)),
          coalesce(sum(b.bal), 0),
          coalesce(percentile_cont(0.5) within group (order by b.bal), 0),
          coalesce(percentile_cont(0.9) within group (order by b.bal), 0),
@@ -89,7 +94,7 @@ begin
          round(s, 3), round(g, 3), round(vv, 2), manual
     from (select p.id, coalesce((select sum(amount) from public.credit_ledger c
                                   where c.user_id = p.id and c.created_at < d1), 0) as bal
-            from public.profiles p where p.created_at < d1) b
+            from public.profiles p where p.created_at < d1 and not public.has_unlimited_slashes(p.id)) b
   on conflict (day) do update set
     weekly_active = excluded.weekly_active, answered_sends = excluded.answered_sends,
     link_joins = excluded.link_joins, minted = excluded.minted, spent = excluded.spent,

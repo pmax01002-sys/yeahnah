@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
 import { Px } from './icons.jsx';
 import { useDeckMotion } from './deckMotion.js';
+import { PowerUpArt, RARITY } from './powerupArt.jsx';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -309,7 +310,7 @@ function Signed() {
         <div className="brand"><span>yeah</span>/<em>nah</em></div>
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
-          <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
+          <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.unlimited ? '∞ slashes' : `${d.me.credits} ${d.me.credits === 1 ? 'slash' : 'slashes'}`}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
@@ -699,7 +700,6 @@ function dealable(d, today, skip) {
 // slashes to claim; rarer ones hold more. It's a card in the hand like any
 // other, under the id PU, and stays there once claimed.
 const PU = 'powerup';
-const RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
 function PowerUpCard({ p, reload }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -711,7 +711,7 @@ function PowerUpCard({ p, reload }) {
     setBusy(false);
   }
   return (
-    <div className={`card deck-card powerup ${p.rarity}${p.claimed ? ' claimed' : ''}`}>
+    <div className={`card deck-card powerup ${p.rarity} ${p.kind}${p.claimed ? ' claimed' : ''}`}>
       <div className="chips">
         <span className="chip rarity">{p.rarity}</span>
         <span className="pips" role="img" aria-label={`Rarity ${level} of 5`}>
@@ -719,10 +719,7 @@ function PowerUpCard({ p, reload }) {
         </span>
         <span className="chip">Power-up</span>
       </div>
-      <div className="pu-art" aria-hidden="true">
-        <span className="n">+{p.slashes}</span>
-        <span className="w">{unit}</span>
-      </div>
+      <PowerUpArt p={p} />
       <h2 className="qtext">{p.name}</h2>
       <p className="hint">{p.blurb}</p>
       {p.claimed
@@ -1082,7 +1079,7 @@ function FutureLocked({ d, reload }) {
         <div className="panel">
           <span>Guess how everyone will answer today's question, what your friends will say, and what will happen in the world. Every guess builds a hit rate on your profile.</span>
           <ul className="needs">
-            <Need ok={enough}>{cost} slashes, once. You have {d.me.credits}.</Need>
+            <Need ok={enough}>{cost} slashes, once. You have {d.me.unlimited ? 'unlimited slashes' : d.me.credits}.</Need>
             <Need ok={d.me.is_adult}>A date of birth on your profile showing you're 18 or over.</Need>
           </ul>
           <button className="solid" disabled={!ready || busy} onClick={unlock}>{busy ? 'Unlocking…' : `Unlock Future · ${cost} slashes`}</button>
