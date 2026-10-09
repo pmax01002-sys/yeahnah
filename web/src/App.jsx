@@ -136,7 +136,7 @@ function SignIn() {
           value={password} onChange={e => setPassword(e.target.value)} /></label>
       <Msg error={error} note={note} />
       <button className="solid" disabled={busy}>{mode === 'signin' ? 'Sign in' : 'Create account'}</button>
-      <p className="hint">Demo build. Credits are free play credits with no money value. <PrivacyLink>How we handle your data</PrivacyLink></p>
+      <p className="hint">Demo build. Slashes are free play points with no money value. <PrivacyLink>How we handle your data</PrivacyLink></p>
     </form></div>
   );
 }
@@ -248,7 +248,7 @@ function Signed() {
         <div className="brand"><span>yeah</span>/<em>nah</em></div>
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
-          <span className="pill credits" title="Free play credits">{d.me.credits} cr</span>
+          <span className="pill credits" title="Free play points">{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
@@ -371,7 +371,7 @@ function QuestionCard({ q, small, d, reload, now, inbox }) {
           : <p className="hint">You've used today's change of mind.</p>)}
         {canSend && (
           <div className="panel">
-            <span className="label">Send to a friend (3 credits). They get 2 if they answer in time.</span>
+            <span className="label">Send to a friend (3 slashes). They get 2 if they answer in time.</span>
             <div className="inline">
               <select value={sendTo} onChange={e => setSendTo(e.target.value)} aria-label="Friend">
                 <option value="">Pick a friend</option>
@@ -393,7 +393,7 @@ function QuestionCard({ q, small, d, reload, now, inbox }) {
     <div className={`card${small ? ' small' : ''}`}>
       <Chips q={q}>{challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}</Chips>
       <h2 className="qtext">{q.text}</h2>
-      {challenge && !mine && <p className="hint">Sent by {d.person[challenge.from_user]?.display_name}. Answer before the timer runs out for 2 credits. Doesn't count towards your daily answers.</p>}
+      {challenge && !mine && <p className="hint">Sent by {d.person[challenge.from_user]?.display_name}. Answer before the timer runs out for 2 slashes. Doesn't count towards your daily answers.</p>}
       {body}
       <Msg error={error} note={note} />
     </div>

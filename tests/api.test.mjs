@@ -181,7 +181,7 @@ test('nobody can list strangers; finding an exact handle still works', async () 
   await ok(stranger.rpc('delete_my_account'));
 });
 
-test('sending a question costs 3 credits; answering in time earns 2 and skips the daily limit', async () => {
+test('sending a question costs 3 slashes; answering in time earns 2 and skips the daily limit', async () => {
   const q = others[6];
   await fails(bob.rpc('send_challenge', { p_handle: tia.handle, p_question: q, p_minutes: 60 }), /friends/);
   await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 60 }), /yourself first/);
@@ -197,13 +197,13 @@ test('sending a question costs 3 credits; answering in time earns 2 and skips th
   // Her last visibility choice (private) carried over to this answer.
   const v = await ok(alice.from('statements').select('visibility').eq('question_id', q).eq('user_id', (await me(alice)).id));
   assert.deepEqual(v, [{ visibility: 'private' }]);
-  // Credits run out: 7 -> 4 -> 1, then refused.
+  // Slashes run out: 7 -> 4 -> 1, then refused.
   await ok(bob.rpc('answer', { p_question: others[7], p_value: true }));
   await ok(bob.rpc('answer', { p_question: others[8], p_value: true }));
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[7], p_minutes: 1440 }));
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 1 }));
   assert.equal((await me(bob)).credits, 1);
-  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 3 credits/);
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 3 slashes/);
 });
 
 test('predictions are free and build a hit rate', async () => {

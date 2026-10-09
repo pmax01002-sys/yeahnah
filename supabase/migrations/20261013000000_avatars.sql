@@ -1,6 +1,6 @@
 -- Avatars: each person can pick one of the pixel avatars (Cap, Specs,
--- Pigtails, Owl, Frog, Fox, each in Red or Blue). Stored as '<sprite>-<palette>',
--- e.g. 'cap-red', matching the app's image names. Null = not picked yet.
+-- Pigtails, Owl, Frog, Fox, each in red or green). Stored as '<sprite>-<tone>',
+-- e.g. 'frog-green', matching the app's image names. Null = not picked yet.
 -- Anyone who can see your name sees your avatar.
 --
 -- Safe to run twice.
