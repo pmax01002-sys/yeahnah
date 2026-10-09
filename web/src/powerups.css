@@ -16,25 +16,28 @@
 .pips { display: inline-flex; gap: 2px; align-items: center; }
 .pips i { width: 7px; height: 7px; border: 1px solid var(--ink); background: var(--surface); }
 .pips i.on { background: var(--rar); }
-/* The art panel: a plain window with the card's text glyph in its rarity colour. */
+/* The art panel takes whatever height the deck leaves after the text, so a power-up card is never
+   taller than the question cards around it. The glyph scales with the panel. */
+.card.powerup { gap: 8px; }
 .pu-art {
-  min-height: clamp(120px, 24vh, 210px); border: var(--b) solid var(--ink); border-radius: 10px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  flex: 1 1 auto; min-height: 52px; container-type: size; border: var(--b) solid var(--ink); border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   background: var(--surface); color: var(--ink); font-family: var(--display); line-height: 1;
 }
 .pu-art .g {
-  font-family: var(--display); font-size: 76px; font-weight: 700; letter-spacing: .04em; white-space: nowrap;
+  font-family: var(--display); font-size: clamp(30px, 42cqh, 76px); font-weight: 700; letter-spacing: .04em; white-space: nowrap;
   color: var(--rar); text-shadow: 3px 3px 0 var(--ink);
 }
 .pu-art .g .star { width: .5em; height: .5em; margin: 0 .06em; vertical-align: .1em; filter: drop-shadow(3px 3px 0 var(--ink)); }
 .pu-art .w { font-size: 15px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+@container (max-height: 96px) { .pu-art .w { display: none; } }  /* on a short screen the glyph alone has room */
 /* Legendary: the glyph glints. */
 .powerup.legendary .pu-art .g { animation: pu-glint 2.6s steps(1) infinite; }
 @keyframes pu-glint { 0%, 70% { filter: none; } 75%, 85% { filter: brightness(1.45); } 80% { filter: brightness(1.8); } }
 .powerup.claimed .pu-art { border-style: dashed; }
 .powerup.claimed .pu-art .g { color: var(--ink); text-shadow: none; animation: none; opacity: .4; }
 .powerup.claimed .pu-art .g .star { filter: none; }
-.pu-claim { align-self: stretch; font-size: 18px; padding: 12px 14px; }
+.pu-claim { align-self: stretch; font-size: 18px; padding: 10px 14px; }
 .pu-done { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--display); font-weight: 600; }
 .dot.powerup { background: var(--rar); }
 .dot.powerup.done { background: var(--ink); }
