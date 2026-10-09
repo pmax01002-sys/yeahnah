@@ -6,7 +6,7 @@ prototype's rules enforced on the server. It runs on free tiers.
 ```
 web/       the app people use (React, built to a static site)
 supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     20 end-to-end checks of the rules, run through the same API the app uses
+tests/     21 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
@@ -17,9 +17,10 @@ tests/     20 end-to-end checks of the rules, run through the same API the app u
 - **5 answers a day**, one always kept for the daily question. **One change of mind a day**, and the changed answer is hidden from others for 7 days.
 - **Who sees each answer**: public, friends or private. Your last choice carries over, except sensitive answers, which always start private. Before you pick one, standard answers start public; set `new_answers_public` to 0 in `app_config` to start them friends-only. Under-18s can never be public.
 - **Sensitive questions** (religion, politics) need an 18+ opt-in, which is recorded as consent and can be withdrawn.
-- **Friends** are people who follow each other. Send a friend a question for 3 credits with a 1 minute, 1 hour or 1 day timer; they earn 2 credits for answering in time, and it doesn't use up their daily 5. Everyone starts with 10 credits.
+- **Friends** are people who follow each other. Send a friend a question for 3 slashes (free play points) with a 1 minute, 1 hour or 1 day timer; they earn 2 slashes for answering in time, and it doesn't use up their daily 5. Everyone starts with 10 slashes.
 - **Friend groups**: make a group, tap Invite friends and send the link. Whoever signs up through it joins the group and becomes friends with everyone in it. The Group tab shows, per question, how each member answered, once you've answered it yourself. Private answers stay hidden. Groups are 18+ in the demo. Anyone with the invite link can join, so it's for sending to friends. Leaving a group ends the friendships it made, and whoever made the group can remove someone, who then can't rejoin with the link.
 - **Finding people**: you can only see the profiles of people you're connected to (friends, followers, your groups). To add someone new, type their exact handle.
+- **Avatars**: each person's pick is saved with `set_avatar('cap-red')` and shown to anyone who can see their name. The picker comes with the retro restyle.
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
 - **Suggest a question**, which waits for a moderator.
@@ -27,7 +28,7 @@ tests/     20 end-to-end checks of the rules, run through the same API the app u
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
 
-All the numbers (5 a day, 3 credits, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code.
+All the numbers (5 a day, 3 slashes, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code.
 
 ## Put it online (about 20 minutes, £0)
 
@@ -45,7 +46,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds all three later updates (18+ and themes, the privacy fixes, the complete data download) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
@@ -54,6 +55,16 @@ Run only the migration files newer than your setup, in date order, in the SQL Ed
 3. Settings: root directory `web`, build command `npm run build`, output directory `dist`.
 4. Add two environment variables: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` with the values from step 1.5.
 5. Deploy. You get a `https://<name>.pages.dev` link to share. Every push to GitHub redeploys.
+
+#### Your own address (optional)
+
+To serve the demo from a domain you own, use a subdomain such as `yeahnah.cookiebadboy.com` so anything already on the main domain keeps working.
+
+1. In Cloudflare, open **Workers & Pages**, pick the project, go to **Custom domains** and choose **Set up a custom domain**. Enter `yeahnah.cookiebadboy.com` and continue. Do this before touching DNS; a DNS record pointing at Pages without this step gives a 522 error.
+2. If the domain's DNS is already on Cloudflare, it adds the record for you. If not, add a **CNAME** record at your domain registrar: name `yeahnah`, target `<project>.pages.dev`. Cloudflare then checks it and issues the HTTPS certificate on its own.
+3. In Supabase, go to **Authentication > URL Configuration**. Set **Site URL** to `https://yeahnah.cookiebadboy.com` and add `https://yeahnah.cookiebadboy.com/**` under **Redirect URLs**, so sign-in emails link to the right place once you turn them on.
+
+The `pages.dev` link keeps working. Invite links use whichever address the inviter has open, so share the new one. Sign-ins are kept per address, so people who signed in on the old link sign in once more on the new one.
 
 The anon key is meant to be public: row-level security in the database decides what each signed-in person can see. Never put the `service_role` key in the app.
 

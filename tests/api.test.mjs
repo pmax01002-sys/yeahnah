@@ -181,7 +181,7 @@ test('nobody can list strangers; finding an exact handle still works', async () 
   await ok(stranger.rpc('delete_my_account'));
 });
 
-test('sending a question costs 3 credits; answering in time earns 2 and skips the daily limit', async () => {
+test('sending a question costs 3 slashes; answering in time earns 2 and skips the daily limit', async () => {
   const q = others[6];
   await fails(bob.rpc('send_challenge', { p_handle: tia.handle, p_question: q, p_minutes: 60 }), /friends/);
   await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: q, p_minutes: 60 }), /yourself first/);
@@ -197,13 +197,13 @@ test('sending a question costs 3 credits; answering in time earns 2 and skips th
   // Her last visibility choice (private) carried over to this answer.
   const v = await ok(alice.from('statements').select('visibility').eq('question_id', q).eq('user_id', (await me(alice)).id));
   assert.deepEqual(v, [{ visibility: 'private' }]);
-  // Credits run out: 7 -> 4 -> 1, then refused.
+  // Slashes run out: 7 -> 4 -> 1, then refused.
   await ok(bob.rpc('answer', { p_question: others[7], p_value: true }));
   await ok(bob.rpc('answer', { p_question: others[8], p_value: true }));
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[7], p_minutes: 1440 }));
   await ok(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 1 }));
   assert.equal((await me(bob)).credits, 1);
-  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 3 credits/);
+  await fails(bob.rpc('send_challenge', { p_handle: alice.handle, p_question: others[8], p_minutes: 60 }), /costs 3 slashes/);
 });
 
 test('predictions are free and build a hit rate', async () => {
@@ -247,6 +247,20 @@ test('partner apps write verified answers from the server only', async () => {
   await ok(admin.rpc('partner_write', { p_user: aliceId, p_question: fivek, p_value: true, p_source: 'strava' }));
   const s = await ok(alice.from('statements').select('value,source,verified').eq('question_id', fivek));
   assert.deepEqual(s, [{ value: true, source: 'strava', verified: true }]);
+});
+
+test('avatars: pick one, and friends see it', async () => {
+  await ok(alice.rpc('set_avatar', { p_avatar: 'owl-red' }));
+  assert.equal((await me(alice)).avatar, 'owl-red');
+  await fails(alice.rpc('set_avatar', { p_avatar: '<img src=x>' }), /Pick one/);
+  await fails(alice.from('profiles').update({ avatar: 'fox-blue' }).eq('handle', alice.handle).select().single());
+  assert.deepEqual(await ok(bob.from('profiles').select('avatar').eq('handle', alice.handle)), [{ avatar: 'owl-red' }]);
+  assert.equal((await ok(bob.rpc('profile_card', { p_handle: alice.handle }))).avatar, 'owl-red');
+  const fa = await ok(bob.rpc('friends_answers', { p_question: daily.id }));
+  assert.ok(fa.every(r => 'avatar' in r));
+  await ok(alice.rpc('set_avatar', { p_avatar: '' }));
+  assert.equal((await me(alice)).avatar, null);
+  await ok(alice.rpc('set_avatar', { p_avatar: 'owl-red' }));
 });
 
 test('download my data and delete my account', async () => {
@@ -298,6 +312,7 @@ test('friend groups: invite link, everyone becomes friends, answers per question
   await ok(host.rpc('answer', { p_question: daily.id, p_value: false }));
   board = await ok(host.rpc('group_board', { p_group: g.id }));
   row = board.find(r => r.question_id === daily.id);
+  assert.ok(row.answers.every(a => 'avatar' in a));
   assert.deepEqual(row.answers.map(a => [a.name, a.value, a.me]),
     [['host', false, true], ['gina', true, false], ['gus', false, false]]);
 
