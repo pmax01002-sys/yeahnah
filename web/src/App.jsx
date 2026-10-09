@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
+import { Px } from './icons.jsx';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -243,7 +244,7 @@ function Signed() {
 
   const inbox = d.challenges.filter(c => c.to_user === d.me.id && !c.answered_at && new Date(c.expires_at) > now);
   const ctx = { d, reload, open: setSheet, now, inbox };
-  const TABS = [['today', '☀️', 'Today'], ['questions', '📋', 'Questions'], ['predict', '🔮', 'Predict'], ['friends', '👥', 'Group'], ['profile', '🙂', 'Profile']];
+  const TABS = [['today', 'today', 'Today'], ['questions', 'questions', 'Questions'], ['predict', 'predict', 'Predict'], ['friends', 'group', 'Group'], ['profile', 'profile', 'Profile']];
 
   return (
     <div className="app">
@@ -266,7 +267,7 @@ function Signed() {
       <nav className="nav" aria-label="Main">
         {TABS.map(([k, ico, label]) => (
           <button key={k} aria-current={tab === k ? 'page' : 'false'} onClick={() => { setTab(k); setSheet(null); }}>
-            <span className="ico" aria-hidden="true">{ico}</span>{label}
+            <span className="ico"><Px name={ico} /></span>{label}
             {k === 'friends' && inbox.length > 0 && <span className="badge">{inbox.length}</span>}
           </button>
         ))}
@@ -439,7 +440,7 @@ function Row({ q, d, open, extra }) {
   return (
     <button className="row" onClick={() => open(q.id)}>
       <span><span className="t">{q.text}</span><Chips q={q}>{extra}</Chips></span>
-      <span>{locked ? '🔒' : mine ? <Pill q={q} v={mine.value} /> : null}</span>
+      <span>{locked ? <Px name="lock" label="Locked" /> : mine ? <Pill q={q} v={mine.value} /> : null}</span>
     </button>
   );
 }
@@ -771,7 +772,7 @@ function Friends({ d, reload, open, now, inbox }) {
           {inbox.map(c => (
             <button key={c.id} className="row" onClick={() => open(c.question_id)}>
               <span><span className="t">{d.byId[c.question_id]?.text}</span><span className="hint">from {d.person[c.from_user]?.display_name}</span></span>
-              <span className="chip timer">⏱ {left(c.expires_at, now)}</span>
+              <span className="chip timer"><Px name="timer" scale={1} /> {left(c.expires_at, now)}</span>
             </button>
           ))}
         </div>
@@ -978,7 +979,7 @@ function Groups({ d, reload, open }) {
                       <span key={a.handle} className={`vpill ${pillClass(q, a.value)}`}>{a.me ? 'You' : a.name}: {word(q, a.value)}</span>))}</span>
                   : <span className="hint">{r.answered} of {people.length} answered. Answer it to see who said what.</span>}
               </span>
-              <span>{r.answers ? '' : '🔒'}</span>
+              <span>{r.answers ? '' : <Px name="lock" label="Locked" />}</span>
             </button>
           );
         })}
@@ -994,7 +995,7 @@ function Groups({ d, reload, open }) {
           <div className="chips" style={{ marginTop: 8 }}>
             {people.filter(p => p.id !== d.me.id).map(p => (
               <button key={p.id} className="chip" onClick={() => window.confirm(`Remove ${p.display_name} from ${g.name}? They won't be able to rejoin with the invite link.`)
-                && act('remove_member', { p_group: g.id, p_user: p.id }, `${p.display_name} was removed.`)}>{p.display_name} ✕</button>
+                && act('remove_member', { p_group: g.id, p_user: p.id }, `${p.display_name} was removed.`)}>{p.display_name} <Px name="close" scale={1} /></button>
             ))}
           </div>
         </details>

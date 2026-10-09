@@ -60,9 +60,8 @@ button:disabled { cursor: not-allowed; background: var(--dither) !important; col
 .nav { display: grid; grid-template-columns: repeat(5, 1fr); border-top: var(--b) solid var(--ink); background: var(--surface); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .nav button { background: var(--surface); border: 0; border-right: var(--b) solid var(--ink); padding: 8px 0 9px; font-family: var(--display); font-size: 12px; color: var(--ink); display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
 .nav button:last-child { border-right: 0; }
-.nav button .ico { font-size: 18px; line-height: 1; filter: grayscale(1) contrast(1.4); }
+.nav button .ico { height: 24px; display: flex; align-items: center; }
 .nav button[aria-current="page"] { background: var(--hi); color: var(--hi-ink); }
-.nav button[aria-current="page"] .ico { filter: grayscale(1) invert(1) contrast(1.4); }
 .badge { position: absolute; top: 4px; right: calc(50% - 22px); background: var(--no); color: var(--surface); font-size: 10px; border: 1px solid var(--surface); padding: 0 4px; }
 
 h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; line-height: 1.15; text-wrap: balance; }
@@ -186,3 +185,8 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 /* Today's question stands out with a tint. */
 .card.daily { background: var(--daily); }
 .chip.daily { background: var(--daily); font-weight: 600; }
+
+/* pixel icons (icons.jsx): ink is currentColor; on an inverted selection the red and green go to the same ink */
+.px { display: inline-block; vertical-align: middle; flex: none; }
+.chip .px { vertical-align: -1px; }
+.nav button[aria-current="page"], [aria-pressed="true"] { --px-r: currentColor; --px-g: currentColor; }
