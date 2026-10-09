@@ -123,6 +123,7 @@ function SignIn() {
   return (
     <div className="app"><form className="screen center" onSubmit={submit}>
       <div className="big-brand"><span>yeah</span>/<em>nah</em></div>
+      <p className="slogan">Believe it? Call it!</p>
       <p className="hint">One yes/no question a day. Your answers build your profile.</p>
       <InviteBanner />
       <div className="seg" role="group" aria-label="Sign in or sign up">
