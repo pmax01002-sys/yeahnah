@@ -652,3 +652,50 @@ test('feedback lands in a table only its author (and the owner) can read', async
   const all = await ok(admin.from('feedback').select('body,context'));
   assert.deepEqual(all, [{ body: 'Love the flat Earth one', context: 'today' }]);
 });
+
+test('admins review suggestions, reports and feedback; everyone else is kept out', async () => {
+  const w = await user('writer', '1990-01-01');
+  const mod = await user('mod', '1990-01-01');
+  const qid = await ok(w.rpc('submit_question', { p_text: `Admin check ${run}?`, p_category: 'General' }));
+  await ok(w.rpc('report', { p_reason: 'Testing reports', p_question: qid }));
+  await ok(w.rpc('submit_feedback', { p_body: 'Admin inbox check', p_context: 'profile' }));
+
+  // Not an admin: every admin call is refused, and the audit log can't be read directly.
+  assert.equal(await ok(mod.rpc('is_admin')), false);
+  await fails(mod.rpc('admin_summary'), /Only admins/);
+  await fails(mod.rpc('admin_set_question', { p_question: qid, p_status: 'approved' }), /Only admins/);
+  await fails(mod.from('question_audit').select('id'));
+  await fails(mod.from('admins').insert({ user_id: (await me(mod)).id }));
+
+  const modId = (await me(mod)).id;
+  await ok(admin.from('admins').insert({ user_id: modId }));
+  try {
+    assert.equal(await ok(mod.rpc('is_admin')), true);
+    const pending = await ok(mod.rpc('admin_questions', { p_status: 'pending', p_search: `Admin check ${run}` }));
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].author.handle, w.handle);
+
+    // Reject with a refund: the 5 slashes come back, once.
+    const before = (await me(w)).credits;
+    await ok(mod.rpc('admin_set_question', { p_question: qid, p_status: 'rejected', p_note: 'test', p_refund: true }));
+    await ok(mod.rpc('admin_set_question', { p_question: qid, p_status: 'rejected', p_refund: true }));
+    assert.equal((await me(w)).credits, before + 5);
+
+    // Back to review, edited and approved: it's live and every step is in the log.
+    await ok(mod.rpc('admin_set_question', { p_question: qid, p_status: 'pending' }));
+    await ok(mod.rpc('admin_set_question', { p_question: qid, p_status: 'approved', p_text: `Admin checked ${run}?` }));
+    const log = await ok(mod.rpc('admin_audit', { p_question: qid }));
+    assert.deepEqual(log.map(e => e.action).reverse(), ['submitted', 'rejected', 'refunded', 'reopened', 'edited', 'approved']);
+    assert.equal(log.find(e => e.action === 'rejected').note, 'test');
+
+    const [r] = (await ok(mod.rpc('admin_reports'))).filter(x => x.question && x.question.id === qid);
+    await ok(mod.rpc('admin_set_report', { p_report: r.id, p_status: 'actioned', p_note: 'Taken down', p_hide_question: true }));
+    assert.equal((await ok(admin.from('questions').select('status').eq('id', qid).single())).status, 'rejected');
+
+    const [f] = (await ok(mod.rpc('admin_feedback'))).filter(x => x.body === 'Admin inbox check');
+    await ok(mod.rpc('admin_set_feedback', { p_feedback: f.id, p_status: 'done', p_note: 'Thanks' }));
+    assert.equal((await ok(mod.rpc('admin_feedback', { p_status: 'open' }))).some(x => x.id === f.id), false);
+  } finally {
+    await ok(admin.from('admins').delete().eq('user_id', modId));
+  }
+});
