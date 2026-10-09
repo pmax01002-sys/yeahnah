@@ -124,4 +124,4 @@ Set these under **Settings > Secrets and variables > Actions > Variables** so th
 
 **Google Play**: make an upload keystore (`keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`), add `ANDROID_KEYSTORE_BASE64` (`base64 -w0 upload.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` as secrets, and run the workflow with **release** ticked. Upload the signed `.aab` from the run's Artifacts to the Play Console's internal testing track.
 
-To change the app icon or splash screen, replace the images in `web/assets` and run `npx @capacitor/assets generate --iconBackgroundColor '#151829' --splashBackgroundColor '#151829'` in `web/`, then put back `web/public` (the tool also rewrites the website's icons).
+To change the app icon or splash screen, replace the images in `web/assets` and run `npx @capacitor/assets generate --iconBackgroundColor '#FF6EC7' --splashBackgroundColor '#FF6EC7' --ios --android` in `web/`.
