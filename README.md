@@ -24,6 +24,7 @@ tests/     24 end-to-end checks of the rules, run through the same API the app u
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Future** (was Predict): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile. It starts locked: unlocking costs 100 slashes once (`future_unlock_cost`) and needs a date of birth showing 18 or over, which keeps throwaway accounts out. After that, guesses are free. The tab explains that prediction markets have no house.
 - **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. Any question you write can also be shared as a link: people without an account see it on the sign-up page, and once in they can answer it and send you a friend request. For everyone, it waits for a moderator and costs 5 slashes.
+- **Economy record** (for tuning slashtax): every night a read-only job adds a row to `economy_days` for the UK day just gone: weekly active people, answered sends, people who came in through a link, slashes created and spent, total slashes held, median and top balances, how many people hold over 20, and the virality number v. Read it in the Supabase table editor; the app never shows it, and nobody's slashes change. Its targets are in `app_config` (`virality_*`, `slashtax_allowance`).
 - **Download my data** (everything held about you, as a file) and **delete my account** (UK GDPR).
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
@@ -46,7 +47,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, the economy record) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
