@@ -252,3 +252,6 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .chip .px { vertical-align: -1px; }
 .ghost .px { margin-right: 4px; vertical-align: -3px; }
 .nav button[aria-current="page"], [aria-pressed="true"] { --px-r: currentColor; --px-g: currentColor; }
+/* Group tab: a friend's row opens their profile */
+.person-row .agree { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.linkbtn.back { display: inline-flex; align-items: center; gap: 6px; margin: 4px 2px 0; text-decoration: none; font-family: var(--display); font-size: 13px; }

@@ -1357,12 +1357,17 @@ function Friends({ d, reload, open, now, inbox }) {
   const [handle, setHandle] = useState('');
   const [card, setCard] = useState(null);
   const [error, setError] = useState('');
-  const [agree, setAgree] = useState({});
+  const [viewing, setViewing] = useState(null);
   const meId = d.me.id;
+  const friendIds = d.friends.filter(Boolean).map(f => f.id);
+  const answers = useAnswersOf(friendIds);
 
-  useEffect(() => {
-    d.friends.forEach(f => call('agreement_with', { p_handle: f.handle }).then(a => setAgree(x => ({ ...x, [f.id]: a }))).catch(() => {}));
-  }, [d.friends.length]);
+  // A profile replaces the list; Back returns to it at the top.
+  function view(p) {
+    setViewing(p);
+    document.querySelector('.screen')?.scrollTo(0, 0);
+  }
+  if (viewing) return <PersonProfile d={d} who={viewing} open={open} onBack={() => view(null)} />;
 
   async function find(e) {
     e.preventDefault(); setError(''); setCard(null);
@@ -1385,7 +1390,7 @@ function Friends({ d, reload, open, now, inbox }) {
 
   return (
     <>
-      <Groups d={d} reload={reload} open={open} />
+      <Groups d={d} reload={reload} open={open} view={view} />
       <div className="section"><h2>Add someone by handle</h2></div>
       <form className="inline" onSubmit={find} style={{ marginTop: 6 }}>
         <input placeholder="Find someone by @handle" value={handle} onChange={e => setHandle(e.target.value)} aria-label="Handle" />
@@ -1396,6 +1401,10 @@ function Friends({ d, reload, open, now, inbox }) {
         <div className="panel" style={{ marginTop: 10 }}>
           <strong>{card.display_name} <span className="hint">@{card.handle}</span></strong>
           <span className="hint">Hit rate {card.predictions.rate ?? '–'}{card.predictions.rate != null && '%'} · {card.is_friend ? 'Friends' : card.follows_me ? 'Follows you' : 'Not connected'}</span>
+          <button className="linkbtn" onClick={async () => {
+            const id = card.id || (await supabase.from('profiles').select('id').eq('handle', card.handle).single()).data?.id;
+            if (id) view({ id, handle: card.handle, display_name: card.display_name });
+          }}>See their answers</button>
           {card.i_follow
             ? <button className="ghost" onClick={() => follow(cardId, false)}>Unfollow</button>
             : <button className="solid" onClick={async () => {
@@ -1429,18 +1438,151 @@ function Friends({ d, reload, open, now, inbox }) {
       <div className="section"><h2>Friends</h2>
         <p className="hint">Friends follow each other. Only friends can send you questions or see friends-only answers.</p>
         {d.friends.length === 0 && <p className="empty">No friends yet. Find someone by their handle.</p>}
-        {d.friends.map(f => {
-          const a = agree[f.id];
-          return (
-            <div className="panel" key={f.id}><div className="toggle-row">
-              <span>{f.display_name} <span className="hint">@{f.handle}</span></span>
-              <span className="agree">{a && a.both > 0 ? <><b>{Math.round((100 * a.agree) / a.both)}%</b> <span className="hint">agree on {a.both}</span></> : <span className="hint">nothing in common yet</span>}</span>
-            </div></div>
-          );
-        })}
+        <div className="rows">
+          {d.friends.filter(Boolean).map(f => {
+            const a = answers && similarity(d, answers[f.id] || []);
+            return (
+              <button className="row person-row" key={f.id} onClick={() => view(f)}>
+                <span>{f.display_name} <span className="hint">@{f.handle}</span></span>
+                <span className="agree">{!a ? '' : a.both > 0
+                  ? <><b>{a.pct}%</b> <span className="hint">alike on {a.both}</span></>
+                  : <span className="hint">nothing in common yet</span>} <Px name="next" scale={1} /></span>
+              </button>
+            );
+          })}
+        </div>
         {waiting.map(p => <p className="hint" key={p.id}>Waiting for {p.display_name} to follow back.</p>)}
       </div>
       <SentByMe d={d} now={now} />
+    </>
+  );
+}
+
+// Other people's current answers, as many as each has let you see: the
+// "read statements" policy only returns public ones, plus friends-only ones
+// to friends, and never private ones.
+function useAnswersOf(ids) {
+  const [rows, setRows] = useState(null);
+  const key = ids.join();
+  useEffect(() => {
+    if (!ids.length) return setRows({});
+    let live = true;
+    supabase.from('statements').select('user_id,question_id,value,visibility,created_at')
+      .in('user_id', ids).is('superseded_at', null).order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!live) return;
+        const by = {};
+        (data || []).forEach(s => (by[s.user_id] = by[s.user_id] || []).push(s));
+        setRows(by);
+      });
+    return () => { live = false; };
+  }, [key]);
+  return rows;
+}
+
+// How alike you are: of the questions you've both answered (where you can see
+// their answer), the share where you picked the same side.
+function similarity(d, theirs) {
+  const both = theirs.filter(s => d.mine[s.question_id] && d.byId[s.question_id]);
+  const agree = both.filter(s => d.mine[s.question_id].value === s.value).length;
+  return { both: both.length, agree, pct: both.length ? Math.round((100 * agree) / both.length) : null };
+}
+
+// Someone's profile: what they answered that you can see, side by side with
+// yours, and how alike the two of you are. Their answer to a question you
+// haven't answered stays hidden until you do, as everywhere else.
+function PersonProfile({ d, who, open, onBack }) {
+  const [card, setCard] = useState(null);
+  const [show, setShow] = useState('all');
+  const theirs = useAnswersOf([who.id]);
+  useEffect(() => { call('profile_card', { p_handle: who.handle }).then(setCard).catch(() => {}); }, [who.handle]);
+
+  const name = who.display_name;
+  const visible = theirs ? (theirs[who.id] || []).filter(s => d.byId[s.question_id]) : null;
+  const sim = similarity(d, visible || []);
+  const isFriend = card ? card.is_friend : d.friends.some(f => f && f.id === who.id);
+
+  // Alike per theme, where you share at least two answers.
+  const themes = {};
+  (visible || []).forEach(s => {
+    const mine = d.mine[s.question_id];
+    if (!mine) return;
+    const t = (themes[d.byId[s.question_id].category] ||= { both: 0, agree: 0 });
+    t.both += 1; if (mine.value === s.value) t.agree += 1;
+  });
+  const byTheme = Object.entries(themes).filter(([, t]) => t.both >= 2)
+    .map(([c, t]) => ({ c, pct: Math.round((100 * t.agree) / t.both), both: t.both }))
+    .sort((a, b) => b.pct - a.pct || b.both - a.both);
+
+  const kind = s => (!d.mine[s.question_id] ? 'locked' : d.mine[s.question_id].value === s.value ? 'same' : 'diff');
+  const counts = { all: 0, same: 0, diff: 0, locked: 0 };
+  (visible || []).forEach(s => { counts.all += 1; counts[kind(s)] += 1; });
+  const list = (visible || []).filter(s => show === 'all' || kind(s) === show)
+    .sort((a, b) => (kind(a) === 'locked') - (kind(b) === 'locked'));
+  const FILTERS = [['all', 'All'], ['same', 'Same'], ['diff', 'Different'], ['locked', 'Not answered yet']];
+
+  return (
+    <>
+      <button className="linkbtn back" onClick={onBack}><Px name="back" scale={1} /> Group</button>
+      <div className="head" style={{ display: 'block' }}>
+        <h1>{name}</h1>
+        <span className="hint">@{who.handle} · {isFriend ? 'Friends' : card?.follows_me ? 'Follows you' : card?.i_follow ? 'Waiting for them to follow back' : 'Not connected'}</span>
+      </div>
+      <div className="stats">
+        <div className="stat"><b>{sim.pct ?? '–'}{sim.pct != null && '%'}</b><span>{sim.both ? `alike on ${sim.both}` : 'alike'}</span></div>
+        <div className="stat"><b>{visible ? visible.length : '–'}</b><span>answers you can see</span></div>
+        <div className="stat"><b>{card?.predictions?.rate ?? '–'}{card?.predictions?.rate != null && '%'}</b><span>hit rate</span></div>
+      </div>
+      {sim.both > 0 && (
+        <p className="hint" style={{ marginTop: 8 }}>
+          You picked the same side as {name} on {sim.agree} of the {sim.both} {sim.both === 1 ? 'question' : 'questions'} you've both answered.
+        </p>
+      )}
+      {byTheme.length > 0 && (
+        <div className="section"><h2>Where you line up</h2>
+          <div className="chips">{byTheme.map(t => (
+            <span key={t.c} className="chip"><Px name={t.c} scale={1} /> {t.c} {t.pct}%</span>
+          ))}</div>
+        </div>
+      )}
+
+      <div className="section"><h2>{name}'s answers</h2>
+        {visible && visible.length > 0 && (
+          <div className="filters" role="group" aria-label="Show">
+            {FILTERS.filter(([k]) => k === 'all' || counts[k] > 0).map(([k, label]) => (
+              <button key={k} aria-pressed={show === k} onClick={() => setShow(k)}>{label} {counts[k]}</button>
+            ))}
+          </div>
+        )}
+        {visible === null && <p className="empty">Loading…</p>}
+        {visible && visible.length === 0 && (
+          <p className="empty">{name} hasn't shared any answers with you yet.</p>
+        )}
+        <div className="rows">
+          {list.map(s => {
+            const q = d.byId[s.question_id], mine = d.mine[s.question_id], k = kind(s);
+            return (
+              <button key={s.question_id} className="row" onClick={() => open(q.id)}>
+                <span>
+                  <span className="t">{q.text}</span>
+                  {k === 'locked'
+                    ? <span className="hint">Answer it to see what {name} said.</span>
+                    : <span className="chips">
+                        <span className={`vpill ${pillClass(q, s.value)}`}>{name}: {word(q, s.value)}</span>
+                        <span className={`vpill ${pillClass(q, mine.value)}`}>You: {word(q, mine.value)}</span>
+                      </span>}
+                </span>
+                <span>{k === 'locked' ? <Px name="lock" label="Locked" /> : k === 'same' ? <Px name="check" label="Same" /> : <Px name="cross" label="Different" />}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          {isFriend
+            ? `You see the answers ${name} shows to friends or everyone. Private answers never show here.`
+            : `You only see answers ${name} made public. Once you're friends you'll see their friends-only answers too.`}
+        </p>
+      </div>
     </>
   );
 }
@@ -1537,7 +1679,7 @@ function Profile({ d, reload }) {
 // Friend groups: an invite link, and everyone's answers per question
 // ---------------------------------------------------------------------------
 
-function Groups({ d, reload, open }) {
+function Groups({ d, reload, open, view }) {
   const [sel, setSel] = useState(null);
   const [name, setName] = useState('');
   const [board, setBoard] = useState(null);
@@ -1599,7 +1741,9 @@ function Groups({ d, reload, open }) {
         </div>
       )}
       <h2>{g.name}</h2>
-      <div className="chips">{people.map(p => <span key={p.id} className="chip">{p.id === d.me.id ? 'You' : p.display_name}</span>)}</div>
+      <div className="chips">{people.map(p => p.id === d.me.id
+        ? <span key={p.id} className="chip">You</span>
+        : <button key={p.id} className="chip" onClick={() => view(p)}>{p.display_name}</button>)}</div>
       <button className="solid" onClick={share}>Invite friends</button>
       <Msg error={error} note={note} />
 
