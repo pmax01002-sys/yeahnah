@@ -22,14 +22,11 @@ export async function shareLink({ title, text, url }) {
   return true;
 }
 
-// When an invite link opens the app (once the site's app links are set up),
-// pass its ?join= code to the same handling the website uses.
-export function onInviteOpened(handle) {
+// When an invite or question link opens the app (once the site's app links
+// are set up), pass its query (?join= or ?q=) to the website's own handling.
+export function onLinkOpened(handle) {
   if (!isNative) return;
   App.addListener('appUrlOpen', ({ url }) => {
-    try {
-      const code = new URL(url).searchParams.get('join');
-      if (code) handle(code);
-    } catch { /* not a link we know */ }
+    try { handle(new URL(url).searchParams); } catch { /* not a link we know */ }
   });
 }

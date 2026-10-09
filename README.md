@@ -6,29 +6,29 @@ prototype's rules enforced on the server. It runs on free tiers.
 ```
 web/       the app people use (React, built to a static site)
 supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     21 end-to-end checks of the rules, run through the same API the app uses
+tests/     24 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
 
 - Sign up with email and password, then a profile with handle, name and date of birth. **18+ only for now.** The under-18 rules below are still built in, and come back if you lower `min_age` in `app_config` (13 is the floor for UK apps).
-- **Today**: the daily question ("Is the Earth flat?" on launch day). The crowd split and friends' answers appear only after you answer.
+- **Today**: a hand of 5 cards a day, starting with the daily question ("Is the Earth flat?" on launch day). Tap left or right to answer, swipe left for the next card and right to go back. The hand is kept on your phone until the next day, answered cards keep their crowd split and friends' answers, and Shuffle swaps the unanswered ones. Questions friends send you are extra green cards. Star questions in the Questions tab and they're dealt in first.
 - **Themes**: 139 questions in 20 themes, including Sport, Music, Film & TV, Travel, Work, Dating, Food, Mysteries, Future, Nostalgia and Brands. The Questions tab shows each theme with how many you've answered; tap one to see just those. Picks like "Messi or Ronaldo?" show both names as the answer buttons.
 - **5 answers a day**, one always kept for the daily question. **One change of mind a day**, and the changed answer is hidden from others for 7 days.
 - **Who sees each answer**: public, friends or private. Your last choice carries over, except sensitive answers, which always start private. Before you pick one, standard answers start public; set `new_answers_public` to 0 in `app_config` to start them friends-only. Under-18s can never be public.
 - **Sensitive questions** (religion, politics) need an 18+ opt-in, which is recorded as consent and can be withdrawn.
-- **Friends** are people who follow each other. Send a friend a question for 3 slashes (free play points) with a 1 minute, 1 hour or 1 day timer; they earn 2 slashes for answering in time, and it doesn't use up their daily 5. Everyone starts with 10 slashes.
+- **Friends** are people who follow each other. Send friends a question you've answered for 2 slashes each (free play points), one by one or a whole group at once, with a 1 minute, 1 hour or 1 day timer; they earn 2 slashes for answering in time, and it doesn't use up their daily 5. Everyone starts with 10 slashes.
 - **Friend groups**: make a group, tap Invite friends and send the link. Whoever signs up through it joins the group and becomes friends with everyone in it. The Group tab shows, per question, how each member answered, once you've answered it yourself. Private answers stay hidden. Groups are 18+ in the demo. Anyone with the invite link can join, so it's for sending to friends. Leaving a group ends the friendships it made, and whoever made the group can remove someone, who then can't rejoin with the link.
 - **Finding people**: you can only see the profiles of people you're connected to (friends, followers, your groups). To add someone new, type their exact handle.
 - **Avatars**: each person's pick is saved with `set_avatar('cap-red')` and shown to anyone who can see their name. The picker comes with the retro restyle.
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
-- **Suggest a question**, which waits for a moderator.
+- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. Any question you write can also be shared as a link: people without an account see it on the sign-up page, and once in they can answer it and send you a friend request. For everyone, it waits for a moderator and costs 5 slashes.
 - **Download my data** (everything held about you, as a file) and **delete my account** (UK GDPR).
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
 
-All the numbers (5 a day, 3 slashes, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code.
+All the numbers (5 a day, slash costs, 7 days hidden, minimum age...) live in the `app_config` table, so you can change them in the Supabase table editor without touching code.
 
 ## Put it online (about 20 minutes, £0)
 
@@ -46,7 +46,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
@@ -87,8 +87,9 @@ SUPABASE_URL=... SUPABASE_ANON_KEY=... SUPABASE_SERVICE_KEY=... npm test
 ### Admin jobs (Supabase SQL Editor)
 
 ```sql
--- approve a suggested question
-update questions set status = 'approved' where id = 123;
+-- see questions waiting for a moderator, then approve or reject one
+select id, text, category, created_at from questions where status = 'pending' order by id;
+update questions set status = 'approved' where id = 123;   -- or 'rejected'
 -- schedule a daily question
 update questions set daily_date = '2026-10-20' where id = 45;
 -- add a world event, then settle it

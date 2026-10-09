@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
-import { isNative, siteUrl, shareLink, onInviteOpened } from './native.js';
+import { isNative, siteUrl, shareLink, onLinkOpened } from './native.js';
+import { Px } from './icons.jsx';
+import { useDeckMotion } from './deckMotion.js';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -32,12 +34,57 @@ function clearInvite() {
   try { localStorage.removeItem(JOIN_KEY); } catch { /* none */ }
 }
 pendingInvite();
-// In the phone apps an invite link arrives as an event rather than the page
-// address: remember it and restart, so it is handled like the website's.
-onInviteOpened(code => {
-  try { localStorage.setItem(JOIN_KEY, code); } catch { /* none */ }
+
+// A question link (?q=CODE) is remembered the same way.
+const QUESTION_KEY = 'yeahnah-q';
+let questionCode = null;
+function pendingQuestion() {
+  const fromUrl = new URLSearchParams(window.location.search).get('q');
+  if (fromUrl) {
+    questionCode = fromUrl;
+    try { localStorage.setItem(QUESTION_KEY, fromUrl); } catch { /* memory copy is enough */ }
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  if (!questionCode) try { questionCode = localStorage.getItem(QUESTION_KEY); } catch { /* none */ }
+  return questionCode;
+}
+function clearQuestion() {
+  questionCode = null;
+  try { localStorage.removeItem(QUESTION_KEY); } catch { /* none */ }
+}
+pendingQuestion();
+
+// In the phone apps an invite or question link arrives as an event rather
+// than the page address: remember it and restart, so it is handled like the
+// website's.
+onLinkOpened(params => {
+  const join = params.get('join'), q = params.get('q');
+  if (!join && !q) return;
+  try {
+    if (join) localStorage.setItem(JOIN_KEY, join);
+    if (q) localStorage.setItem(QUESTION_KEY, q);
+  } catch { /* none */ }
   window.location.reload();
 });
+
+// The question from a link, shown on the sign-up page.
+function QuestionBanner() {
+  const [q, setQ] = useState(null);
+  useEffect(() => {
+    const code = pendingQuestion();
+    if (code) call('question_preview', { p_code: code }).then(setQ).catch(() => {});
+  }, []);
+  if (!q) return null;
+  return (
+    <div className="card shared-q">
+      <span className="label">{q.by ? `${q.by} asked you` : 'You were asked'}</span>
+      <h2 className="qtext">{q.text}</h2>
+      <p className="hint">{q.live
+        ? 'Sign up to answer it and see how everyone else answered.'
+        : 'It goes live once a moderator approves it, and this link works then.'}</p>
+    </div>
+  );
+}
 
 function InviteBanner() {
   const [g, setG] = useState(null);
@@ -110,7 +157,7 @@ export default function App() {
 }
 
 function SignIn() {
-  const [mode, setMode] = useState(pendingInvite() ? 'signup' : 'signin');
+  const [mode, setMode] = useState(pendingInvite() || pendingQuestion() ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -134,6 +181,7 @@ function SignIn() {
       <p className="slogan">Believe it? Call it!</p>
       <p className="hint">One yes/no question a day. Your answers build your profile.</p>
       <InviteBanner />
+      <QuestionBanner />
       <div className="seg" role="group" aria-label="Sign in or sign up">
         <button type="button" aria-pressed={mode === 'signin'} onClick={() => setMode('signin')}>Sign in</button>
         <button type="button" aria-pressed={mode === 'signup'} onClick={() => setMode('signup')}>New here</button>
@@ -190,7 +238,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -199,6 +247,7 @@ function useData() {
       supabase.from('groups').select('id,name,invite_code,created_by').order('created_at'),
       supabase.from('group_members').select('group_id,user_id').order('joined_at'),
       supabase.from('app_config').select('key,value'),
+      supabase.from('stars').select('question_id'),
     ]);
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
@@ -216,6 +265,7 @@ function useData() {
     setD({
       me,
       cfg: Object.fromEntries((config.data || []).map(c => [c.key, c.value])),
+      stars: new Set((stars.data || []).map(s => s.question_id)),
       questions: questions.data,
       byId: Object.fromEntries(questions.data.map(q => [q.id, q])),
       mine: Object.fromEntries(mine.data.map(s => [s.question_id, s])),
@@ -250,12 +300,23 @@ function Signed() {
   }, [meId]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 7000); return () => clearTimeout(t); } }, [toast]);
 
+  // Open the question from a link once the profile exists.
+  const [shared, setShared] = useState(null);
+  useEffect(() => {
+    const code = meId && pendingQuestion();
+    if (!code) return;
+    clearQuestion();
+    call('open_question_link', { p_code: code })
+      .then(async r => { await reload(); setShared(r); setSheet(r.id); })
+      .catch(e => setToast(e.message));
+  }, [meId]);
+
   if (!d) return <div className="app" />;
   if (!d.me) return <CreateProfile onDone={reload} />;
 
   const inbox = d.challenges.filter(c => c.to_user === d.me.id && !c.answered_at && new Date(c.expires_at) > now);
   const ctx = { d, reload, open: setSheet, now, inbox };
-  const TABS = [['today', '☀️', 'Today'], ['questions', '📋', 'Questions'], ['predict', '🔮', 'Predict'], ['friends', '👥', 'Group'], ['profile', '🙂', 'Profile']];
+  const TABS = [['today', 'today', 'Today'], ['questions', 'questions', 'Questions'], ['predict', 'predict', 'Predict'], ['friends', 'group', 'Group'], ['profile', 'profile', 'Profile']];
 
   return (
     <div className="app">
@@ -263,7 +324,7 @@ function Signed() {
         <div className="brand"><span>yeah</span>/<em>nah</em></div>
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
-          <span className="pill credits" title="Slashes: spend 3 to send a friend a question">{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
+          <span className="pill credits" title={`Slashes: spend ${d.cfg.send_cost ?? 2} to send a friend a question`}>{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
@@ -278,20 +339,66 @@ function Signed() {
       <nav className="nav" aria-label="Main">
         {TABS.map(([k, ico, label]) => (
           <button key={k} aria-current={tab === k ? 'page' : 'false'} onClick={() => { setTab(k); setSheet(null); }}>
-            <span className="ico" aria-hidden="true">{ico}</span>{label}
+            <span className="ico"><Px name={ico} /></span>{label}
             {k === 'friends' && inbox.length > 0 && <span className="badge">{inbox.length}</span>}
           </button>
         ))}
       </nav>
       {feedback && <FeedbackSheet tab={tab} onClose={() => setFeedback(false)} />}
-      {sheet && (
+      {sheet && d.byId[sheet] && (
         <div className="scrim" onClick={e => e.target === e.currentTarget && setSheet(null)}>
           <div className="sheet" role="dialog" aria-modal="true">
             <div className="sheet-top"><button className="close" onClick={() => setSheet(null)}>Close</button></div>
+            {shared && shared.id === sheet && <SharedBy shared={shared} setShared={setShared} d={d} />}
             <QuestionCard q={d.byId[sheet]} small {...ctx} />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Above a question opened from a link: who asked, and a friend request if you aren't friends yet.
+function SharedBy({ shared, setShared, d }) {
+  const [error, setError] = useState('');
+  if (!shared.by || shared.by_id === d.me.id) return null;
+  async function follow() {
+    const { error: e } = await supabase.from('follows').insert({ follower: d.me.id, followed: shared.by_id });
+    if (e) setError(e.message); else setShared({ ...shared, following: true });
+  }
+  return (
+    <div className="hook shared-by">
+      {shared.by} shared this with you.{' '}
+      {shared.friends ? null : shared.following
+        ? `Friend request sent. You'll be friends once ${shared.by} adds you back.`
+        : <button className="linkbtn" onClick={follow}>Add {shared.by} as a friend</button>}
+      <Msg error={error} />
+    </div>
+  );
+}
+
+// A link to a question you wrote. Anyone who opens it can answer, signing up first if they need to.
+function ShareLink({ q }) {
+  const [url, setUrl] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  async function share() {
+    setError(''); setNote('');
+    try {
+      const link = url || `${siteUrl}/?q=${await call('share_question', { p_question: q.id })}`;
+      setUrl(link);
+      try { if (await shareLink({ title: 'yeah/nah', text: q.text, url: link })) return; }
+      catch (e) { if (e.name === 'AbortError' || /cancel/i.test(e.message)) return; }
+      try { await navigator.clipboard.writeText(link); setNote('Link copied. Paste it anywhere.'); }
+      catch { setNote('Copy the link above.'); }
+    } catch (e) { setError(e.message); }
+  }
+  return (
+    <div className="share">
+      <button type="button" className="ghost" onClick={share}><Px name="send" /> Share as a link</button>
+      {url && <input readOnly value={url} onFocus={e => e.target.select()} aria-label="Link to this question" />}
+      {q.status === 'pending' && <p className="hint">The link works once a moderator approves the question.</p>}
+      <Msg error={error} note={note} />
     </div>
   );
 }
@@ -309,15 +416,16 @@ function startingVisibility(q, d) {
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
   const v = last ? last.visibility
     : q.sensitivity === 'personal' || d.cfg.new_answers_public === 0 ? 'friends' : 'public';
-  return v === 'public' && !d.me.is_adult ? 'friends' : v;
+  return v === 'public' && (!d.me.is_adult || q.audience === 'friends') ? 'friends' : v;
 }
 
-function VisibilityPicker({ d, value, onChange, label }) {
+// Answers to a friend question never go public, and nor do under-18s' answers.
+function VisibilityPicker({ q, d, value, onChange, label }) {
   return (
     <>
       <span className="label">{label}</span>
       <div className="seg" role="group" aria-label="Visibility">
-        {['public', 'friends', 'private'].filter(v => d.me.is_adult || v !== 'public').map(v => (
+        {['public', 'friends', 'private'].filter(v => v !== 'public' || (d.me.is_adult && q.audience !== 'friends')).map(v => (
           <button key={v} aria-pressed={value === v} onClick={() => onChange(v)}>{v[0].toUpperCase() + v.slice(1)}</button>
         ))}
       </div>
@@ -325,16 +433,22 @@ function VisibilityPicker({ d, value, onChange, label }) {
   );
 }
 
-function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
+// Green for a question written for friends or sent by a friend, pink for today's question.
+function tintOf(q, d) {
+  if (q.audience === 'friends' || d.challenges.some(c => c.to_user === d.me.id && c.question_id === q.id)) return ' friend';
+  return q.daily_date === todayUK() ? ' daily' : '';
+}
+
+function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }) {
   const mine = d.mine[q.id];
   const [vis, setVis] = useState(() => startingVisibility(q, d));
   const [split, setSplit] = useState(null);
   const [friendAns, setFriendAns] = useState([]);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const [sendTo, setSendTo] = useState('');
-  const [timer, setTimer] = useState(1440);
+  const [sending, setSending] = useState(false);
   const challenge = inbox.find(c => c.question_id === q.id);
+  const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
 
   useEffect(() => {
     setError(''); setNote('');
@@ -357,13 +471,15 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
         <button className="solid" onClick={() => act('set_sensitive_opt_in', { p_on: true })}>Turn on sensitive questions</button>
       </div>
     );
+  } else if (!mine && noAnswers) {
+    body = <p className="hint">You've used today's answers. Questions friends send you still count, and there's a new hand tomorrow.</p>;
   } else if (!mine) {
     const opts = q.option_yes
       ? [[true, q.emoji_yes, q.option_yes], [false, q.emoji_no, q.option_no]]
       : [[true, null, 'Yeah'], [false, null, 'Nah']];
     body = (
       <>
-        <VisibilityPicker d={d} value={vis} onChange={setVis} label="Who sees your answer" />
+        <VisibilityPicker q={q} d={d} value={vis} onChange={setVis} label="Who sees your answer" />
         <div className={`answer-row${deck ? ' halves' : ''}`}>
           {opts.map(([v, emoji, label]) => (
             <button key={label} className={`big ${q.option_yes ? 'pick' : v ? 'yes' : 'no'}`}
@@ -378,7 +494,7 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
   } else {
     const pct = split && split.total ? Math.round((100 * split.yes) / split.total) : 0;
     const hidden = mine.hidden_until && new Date(mine.hidden_until) > now;
-    const canSend = !deck && q.sensitivity !== 'sensitive' && d.friends.length > 0;
+    const canSend = q.sensitivity !== 'sensitive' && d.friends.length > 0;
     body = (
       <>
         <div className="inline">
@@ -387,7 +503,7 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
         </div>
         {split && (
           <>
-            <div className={`split${q.option_yes ? ' pick' : ''}`} role="img" aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}`}>
+            <div className={`split${q.option_yes ? ' pick' : ''}${deck ? ' tall' : ''}`} role="img" aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}`}>
               <div className="y" style={{ width: `${pct}%` }}>{pct}% {q.option_yes ? q.emoji_yes : 'yeah'}</div>
               <div className="n">{100 - pct}% {q.option_yes ? q.emoji_no : 'nah'}</div>
             </div>
@@ -401,54 +517,151 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
           <div className="hook">You're one of the {pct}% who said yeah.</div>}
         {hidden && <p className="hint">You changed your mind, so this stays hidden from others until {new Date(mine.hidden_until).toLocaleDateString('en-GB')}.</p>}
         {deck ? (
-          <p className="hint">Seen by: {mine.visibility === 'public' ? 'everyone' : mine.visibility === 'friends' ? 'your friends' : 'only you'}.{' '}
-            <button className="linkbtn" onClick={() => open(q.id)}>Change it, or send to a friend</button></p>
+          <p className="hint">Seen by {mine.visibility === 'public' ? 'everyone' : mine.visibility === 'friends' ? 'your friends' : 'only you'}.{' '}
+            <button className="linkbtn" onClick={() => open(q.id)}>Change</button></p>
         ) : (
-          <VisibilityPicker d={d} value={mine.visibility} label="Who sees this answer on your profile"
+          <VisibilityPicker q={q} d={d} value={mine.visibility} label="Who sees this answer on your profile"
             onChange={v => act('set_visibility', { p_question: q.id, p_visibility: v })} />
         )}
         {!deck && !mine.verified && (d.me.changes_left_today > 0
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
               Change my answer to {word(q, !mine.value).toLowerCase()} (1 a day)</button>
           : <p className="hint">You've used today's change of mind.</p>)}
-        {canSend && (
-          <div className="panel">
-            <span className="label">Send to a friend (3 slashes). They get 2 if they answer in time.</span>
-            <div className="inline">
-              <select value={sendTo} onChange={e => setSendTo(e.target.value)} aria-label="Friend">
-                <option value="">Pick a friend</option>
-                {d.friends.map(f => <option key={f.id} value={f.handle}>{f.display_name} (@{f.handle})</option>)}
-              </select>
-            </div>
-            <div className="seg" role="group" aria-label="Timer">
-              {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
-            </div>
-            <button className="ghost" disabled={!sendTo}
-              onClick={() => act('send_challenge', { p_handle: sendTo, p_question: q.id, p_minutes: timer }, 'Sent. The clock is ticking.')}>Send</button>
-          </div>
-        )}
+        {q.created_by === d.me.id && <ShareLink q={q} />}
+        {canSend && (sending
+          ? <SendPanel q={q} d={d} reload={reload} friendAns={friendAns} onClose={() => setSending(false)} />
+          : <button className="ghost send-btn" onClick={() => setSending(true)}><Px name="send" /> Send to friends or a group</button>)}
       </>
     );
   }
 
   return (
-    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}`}>
-      <Chips q={q}>{challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}</Chips>
+    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}`}>
+      <Chips q={q}>
+        {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
+        {starrable(q) && (deck ? d.stars.has(q.id) : !mine || d.stars.has(q.id)) && <StarToggle q={q} d={d} reload={reload} chip />}
+        {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
+          : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question'
+            : d.person[q.created_by] ? `By ${d.person[q.created_by].display_name}` : 'Shared with you'}</span>}
+        {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {left(challenge.expires_at, now)}</span>}
+      </Chips>
       <h2 className="qtext">{q.text}</h2>
-      {challenge && !mine && <p className="hint">Sent by {d.person[challenge.from_user]?.display_name}. Answer before the timer runs out for 2 slashes. Doesn't count towards your daily answers.</p>}
+      {challenge && !mine && <p className="hint">Answer before the timer runs out for {d.cfg.challenge_reward ?? 2} slashes. Doesn't count towards your daily answers.</p>}
       {body}
       <Msg error={error} note={note} />
     </div>
   );
 }
 
-function Row({ q, d, open, extra }) {
+// Pick friends one by one, or a whole group at once. blocked(handle) gives a
+// reason someone can't be picked, such as having answered already.
+function FriendPicker({ d, picked, setPicked, blocked = () => '' }) {
+  const friends = d.friends.filter(Boolean);
+  const groups = d.groups
+    .map(g => ({ ...g, handles: g.members.map(id => d.person[id]?.handle).filter(h => h && friends.some(f => f.handle === h) && !blocked(h)) }))
+    .filter(g => g.handles.length);
+  const toggle = h => setPicked(p => (p.includes(h) ? p.filter(x => x !== h) : [...p, h]));
+  const toggleGroup = g => setPicked(p => (g.handles.every(h => p.includes(h))
+    ? p.filter(h => !g.handles.includes(h)) : [...new Set([...p, ...g.handles])]));
+  return (
+    <div className="picker">
+      {groups.length > 0 && (
+        <div className="chips">
+          {groups.map(g => (
+            <button type="button" key={g.id} className="chip group" aria-pressed={g.handles.every(h => picked.includes(h))} onClick={() => toggleGroup(g)}>
+              Everyone in {g.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="chips">
+        {friends.map(f => (
+          <button type="button" key={f.handle} className="chip" aria-pressed={picked.includes(f.handle)} disabled={!!blocked(f.handle)} onClick={() => toggle(f.handle)}>
+            {f.display_name}{blocked(f.handle) ? ` · ${blocked(f.handle)}` : ''}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Send a question you've answered to friends.
+function SendPanel({ q, d, reload, friendAns, onClose }) {
+  const cost = q.audience === 'friends' ? 0 : d.cfg.send_cost ?? 2;
+  const [picked, setPicked] = useState([]);
+  const [timer, setTimer] = useState(1440);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const nameOf = h => d.friends.find(f => f && f.handle === h)?.display_name || h;
+  const answered = new Set(friendAns.map(f => f.handle));
+  const sent = new Set(d.challenges.filter(c => c.from_user === d.me.id && c.question_id === q.id).map(c => d.person[c.to_user]?.handle));
+  const blocked = h => (answered.has(h) ? 'answered' : sent.has(h) ? 'sent' : '');
+  const total = picked.length * cost;
+
+  async function send() {
+    setBusy(true); setError(''); setNote('');
+    const ok = [], bad = [];
+    for (const h of picked) {
+      try { await call('send_challenge', { p_handle: h, p_question: q.id, p_minutes: timer }); ok.push(nameOf(h)); }
+      catch (e) { bad.push(`${nameOf(h)}: ${e.message}.`); }
+    }
+    setPicked([]); setBusy(false);
+    if (ok.length) setNote(`Sent to ${ok.join(', ')}. The clock is ticking.`);
+    if (bad.length) setError(bad.join(' '));
+    await reload();
+  }
+
+  return (
+    <div className="panel send">
+      <span className="label">Send to friends: {cost ? `${cost} slashes each` : 'free for a friend question'}. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
+      <FriendPicker d={d} picked={picked} setPicked={setPicked} blocked={blocked} />
+      <div className="seg" role="group" aria-label="Timer">
+        {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
+      </div>
+      <div className="inline">
+        <button className="solid" disabled={!picked.length || busy || total > d.me.credits} onClick={send}>
+          {busy ? 'Sending…' : picked.length ? `Send to ${picked.length} · ${total ? `${total} slashes` : 'free'}` : 'Pick who gets it'}
+        </button>
+        <button className="linkbtn" onClick={onClose}>Close</button>
+      </div>
+      {total > d.me.credits && <p className="hint">You have {d.me.credits} slashes.</p>}
+      <Msg error={error} note={note} />
+    </div>
+  );
+}
+
+function Row({ q, d, open, extra, reload, star }) {
   const mine = d.mine[q.id];
   const locked = q.sensitivity === 'sensitive' && !d.me.sensitive_opt_in;
-  return (
+  const row = (
     <button className="row" onClick={() => open(q.id)}>
       <span><span className="t">{q.text}</span><Chips q={q}>{extra}</Chips></span>
-      <span>{locked ? '🔒' : mine ? <Pill q={q} v={mine.value} /> : null}</span>
+      <span>{locked ? <Px name="lock" label="Locked" /> : mine ? <Pill q={q} v={mine.value} /> : null}</span>
+    </button>
+  );
+  return star && starrable(q) ? <div className="row-star">{row}<StarToggle q={q} d={d} reload={reload} /></div> : row;
+}
+
+// Starred questions you haven't answered are dealt into Today first. Questions
+// written for friends and world events aren't dealt, so they can't be starred.
+const starrable = q => q.audience !== 'friends' && !q.is_event;
+function StarToggle({ q, d, reload, chip }) {
+  const [on, setOn] = useState(d.stars.has(q.id));
+  const [error, setError] = useState('');
+  useEffect(() => setOn(d.stars.has(q.id)), [d.stars, q.id]);
+  async function toggle(e) {
+    e.stopPropagation();
+    const next = !on;
+    setOn(next); setError('');
+    try { await call('set_star', { p_question: q.id, p_on: next }); await reload(); }
+    catch (err) { setOn(!next); setError(err.message); }
+  }
+  const label = on ? 'Starred' : 'Star';
+  return (
+    <button className={chip ? 'chip star' : 'star-btn'} aria-pressed={on} onClick={toggle}
+      aria-label={chip ? undefined : `Star: ${q.text}`} title={error || (on ? 'Starred: comes up first in Today' : 'Star it to get it in Today')}>
+      <Px name={on ? 'star-on' : 'star'} />{chip && ` ${label}`}
     </button>
   );
 }
@@ -457,8 +670,26 @@ function Row({ q, d, open, extra }) {
 // Tabs
 // ---------------------------------------------------------------------------
 
-// Unanswered questions, mixed so the same theme doesn't come up twice in a row.
+function shuffle(xs) {
+  const a = [...xs];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// Puts each id at a random spot among the next few cards after `from`, so
+// questions friends send turn up soon (they're on a timer) but mixed in.
+function shuffleIn(deck, newIds, from) {
+  const out = [...deck];
+  for (const id of newIds) {
+    const at = from + 1 + Math.floor(Math.random() * Math.min(4, out.length - from));
+    out.splice(Math.min(at, out.length), 0, id);
+  }
+  return out;
+}
+
+// Unanswered questions in a random order, mixed so the same theme doesn't come up twice in a row.
 function interleave(qs) {
+  qs = shuffle(qs);
   const byCat = {};
   qs.forEach(q => (byCat[q.category] || (byCat[q.category] = [])).push(q));
   const lists = Object.values(byCat), out = [];
@@ -466,78 +697,168 @@ function interleave(qs) {
   return out;
 }
 
+// Questions that can be dealt: approved, unanswered, not today's or a future
+// daily, and sensitive ones only if you've opted in.
+function dealable(d, today, skip) {
+  const qs = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
+    && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
+    && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
+  // Questions friends wrote come first, then starred ones, then the rest.
+  const rank = q => (q.audience === 'friends' ? 0 : d.stars.has(q.id) ? 1 : 2);
+  return [0, 1, 2].flatMap(r => qs.filter(q => rank(q) === r).map(q => q.id));
+}
+
+// Today's hand is kept on this device, so it survives tab switches and reloads.
+// A new hand is dealt each UK day and older ones are cleared out.
+const HAND_KEY = 'yeahnah-hand-';
+function loadHand(uid, date) {
+  try { return JSON.parse(localStorage.getItem(`${HAND_KEY}${uid}-${date}`)); } catch { return null; }
+}
+function saveHand(uid, date, hand) {
+  try {
+    for (let k = localStorage.length - 1; k >= 0; k--) {
+      const key = localStorage.key(k);
+      if (key && key.startsWith(`${HAND_KEY}${uid}-`) && !key.endsWith(date)) localStorage.removeItem(key);
+    }
+    localStorage.setItem(`${HAND_KEY}${uid}-${date}`, JSON.stringify(hand));
+  } catch { /* private window or storage blocked: the hand just lasts until reload */ }
+}
+
 function Today(ctx) {
   const { d, inbox } = ctx;
   const today = todayUK();
+  const uid = d.me.id;
+  const size = d.cfg.answers_per_day || 5;
   const daily = d.questions.find(q => q.daily_date === today);
-  // The deck is fixed when the tab opens: today's question first, then questions
-  // friends sent you, then everything else you haven't answered.
-  const [ids] = useState(() => {
-    const sent = inbox.map(c => c.question_id).filter(id => !d.mine[id]);
-    const rest = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
-      && (!q.daily_date || q.daily_date < today) && !sent.includes(q.id)
-      && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
-    return [...new Set([daily?.id, ...sent, ...rest.map(q => q.id)].filter(Boolean))];
+  const inboxIds = [...new Set(inbox.map(c => c.question_id))];
+  // Five cards a day: today's question first, then four you haven't answered,
+  // in a shuffled order. Questions friends send you are extra cards on top.
+  const [hand, setHand] = useState(() => {
+    const kept = loadHand(uid, today);
+    if (kept && Array.isArray(kept.ids)) {
+      const ids = kept.ids.filter(id => d.byId[id]);
+      return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids };
+    }
+    const first = daily ? [daily.id] : [];
+    const ids = [...first, ...dealable(d, today, new Set([...first, ...inboxIds])).slice(0, size - first.length)];
+    return { ids, i: 0, seen: ids };
   });
-  const [i, setI] = useState(0);
-  const [drag, setDrag] = useState(null);
-  const [leaving, setLeaving] = useState(0);
+  // A friend's question is shuffled into the next few cards, including ones that arrive while you're here.
+  useEffect(() => {
+    setHand(h => {
+      const fresh = inboxIds.filter(id => d.byId[id] && !h.ids.includes(id));
+      return fresh.length ? { ...h, ids: shuffleIn(h.ids, fresh, h.i), seen: [...h.seen, ...fresh] } : h;
+    });
+  }, [inbox.map(c => c.id).join()]);
+  useEffect(() => saveHand(uid, today, hand), [hand]);
+
+  const [note, setNote] = useState('');
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
-  const q = d.byId[ids[i]];
-  const answered = q && d.mine[q.id];
-  const sentIds = new Set(inbox.map(c => c.question_id));
-  const outOfAnswers = q && !answered && q.id !== daily?.id && !sentIds.has(q.id) && d.me.other_answers_left_today <= 0;
+  const n = hand.ids.length;
+  const q = d.byId[hand.ids[hand.i]];
+  const byFriend = id => d.byId[id]?.audience === 'friends';
+  // Today's question, questions friends sent you and friends wrote don't use up your daily answers.
+  const counts = id => id === daily?.id || inboxIds.includes(id) || byFriend(id);
+  const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
+  // Today's question, questions friends sent and starred ones stay put until answered.
+  const canSwap = id => !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
+  const swappable = hand.ids.filter(canSwap);
+  // Questions friends wrote and questions starred since the hand was dealt take the
+  // place of other unanswered cards, starting from the back and never the card on top.
+  const friendQs = d.questions.filter(x => x.audience === 'friends' && !d.mine[x.id]).map(x => x.id);
+  useEffect(() => {
+    setHand(h => {
+      const want = [
+        ...dealable(d, today, new Set([...h.ids, ...h.seen])).filter(byFriend),
+        ...dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id) && !byFriend(id)),
+      ];
+      if (!want.length) return h;
+      const ids = [...h.ids];
+      for (let k = ids.length - 1; k >= 0 && want.length; k--) {
+        if (k !== h.i && canSwap(ids[k]) && !byFriend(ids[k])) ids[k] = want.shift();
+      }
+      return ids.join() === h.ids.join() ? h : { ...h, ids, seen: [...new Set([...h.seen, ...ids])] };
+    });
+  }, [[...d.stars].join(), friendQs.join()]);
+  const done = hand.ids.filter(id => d.mine[id]).length;
 
-  function next(dir) {
-    if (leaving) return;
-    setLeaving(dir);
-    setTimeout(() => { setLeaving(0); setDrag(null); setI(x => x + 1); }, 230);
+  const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
+  // Each card's place in the stack: 0 on top, then the ones after it, wrapping round the hand.
+  const slots = Object.fromEntries(hand.ids.map((id, k) => [id, (k - hand.i + n) % n]));
+  const motion = useDeckMotion({ slots, can: n > 1, pop: done, onSwipe: dir => (dir < 0 ? step(1) : step(-1)) });
+  // Swipe left (or Next) sends the top card to the back of the stack; swipe right (or Back) brings the last one back.
+  function forward() {
+    if (n < 2) return;
+    setNote(''); motion.dir(-1); step(1);
   }
-  // Swipe either way: before answering it skips, after answering it moves on.
-  const swipe = {
-    onPointerDown: e => { if (!leaving && e.button === 0) setDrag({ x0: e.clientX, dx: 0, on: false }); },
-    onPointerMove: e => {
-      if (!drag) return;
-      const dx = e.clientX - drag.x0;
-      if (!drag.on && Math.abs(dx) > 10) { e.currentTarget.setPointerCapture(e.pointerId); }
-      setDrag({ ...drag, dx, on: drag.on || Math.abs(dx) > 10 });
-    },
-    onPointerUp: () => { if (drag && drag.on && Math.abs(drag.dx) > 80) next(Math.sign(drag.dx)); else setDrag(null); },
-    onPointerCancel: () => setDrag(null),
-  };
-  const style = leaving
-    ? { transform: `translateX(${leaving * 130}%) rotate(${leaving * 14}deg)`, transition: 'transform .23s ease-in' }
-    : drag && drag.on
-      ? { transform: `translateX(${drag.dx}px) rotate(${drag.dx / 22}deg)` }
-      : { transition: 'transform .18s ease-out' };
-  const behind = ids.slice(i + 1, i + 3);
+  function back() {
+    if (n < 2) return;
+    setNote(''); motion.dir(1); step(-1);
+  }
+  function jump(k) {
+    if (k === hand.i) return;
+    setNote(''); motion.dir(k < hand.i ? 1 : -1); setHand(h => ({ ...h, i: k }));
+  }
+  // Shuffle swaps every unanswered card for one you haven't seen today, friends'
+  // questions first, keeping answered cards, today's question, questions friends
+  // sent and starred ones.
+  function reshuffle() {
+    const fresh = dealable(d, today, new Set([...hand.ids, ...hand.seen]));
+    const pool = fresh.length >= swappable.length ? fresh
+      : [...fresh, ...dealable(d, today, new Set([...hand.ids, ...fresh]))];
+    if (!pool.length) { setNote('No other questions left to swap in.'); return; }
+    let k = 0;
+    const ids = hand.ids.map(id => (swappable.includes(id) && k < pool.length ? pool[k++] : id));
+    setHand(h => ({ ...h, ids, seen: [...new Set([...h.seen, ...ids])] }));
+    setNote(`Swapped ${k} card${k === 1 ? '' : 's'}.`);
+  }
+  useEffect(() => {
+    const key = e => {
+      if (document.querySelector('.scrim') || (e.target.closest && e.target.closest('input, select, textarea'))) return;
+      if (e.key === 'ArrowRight') forward();
+      if (e.key === 'ArrowLeft') back();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
 
   return (
     <>
       <div className="head">
-        <span className="eyebrow">{date} · {q && q.id === daily?.id ? "Today's question" : q ? `${ids.length - i - 1} more after this` : 'All done'}</span>
+        <span className="eyebrow">{date} · {q ? `Card ${hand.i + 1} of ${n} · ${done} answered` : 'All done'}</span>
       </div>
-      {!q || outOfAnswers ? (
+      {!q ? (
         <div className="card deck-end">
-          <h2 className="qtext">{q ? 'That\'s your answers for today' : 'You\'ve seen them all'}</h2>
-          <p className="hint">{q
-            ? 'Come back tomorrow for a new daily question. Questions friends send you still count.'
-            : 'New questions arrive every day. Suggest one in the Questions tab.'}</p>
+          <h2 className="qtext">You've seen them all</h2>
+          <p className="hint">New questions arrive every day. Suggest one in the Questions tab.</p>
         </div>
       ) : (
         <div className="deck">
-          {behind.map((id, k) => <div key={id} className={`card behind b${k + 1}`} aria-hidden="true" />).reverse()}
-          <div className="top" style={style} {...swipe}>
-            <QuestionCard key={q.id} q={q} deck {...ctx} />
-          </div>
+          {hand.ids.filter(id => d.byId[id]).map(id => (
+            <div key={id} ref={motion.cardRef(id)} className={`slot${slots[id] === 0 ? ' top' : ''}`}>
+              <QuestionCard q={d.byId[id]} deck noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />
+            </div>
+          ))}
         </div>
       )}
-      {q && !outOfAnswers && (
-        <div className="deck-nav">
-          <span className="hint">{answered ? 'Swipe for the next question' : 'Swipe to skip'}</span>
-          <button className="ghost" onClick={() => next(-1)}>{answered ? 'Next →' : 'Skip →'}</button>
-        </div>
+      {q && (
+        <>
+          <div className="deck-nav">
+            <button className="ghost" onClick={back} disabled={n < 2} aria-label="Previous card">‹ Back</button>
+            <div className="dots" aria-label="Cards in today's hand">
+              {hand.ids.map((id, k) => (
+                <button key={id} className={`dot${d.mine[id] ? ' done' : ''}${tintOf(d.byId[id], d)}`} aria-current={k === hand.i}
+                  aria-label={`Card ${k + 1}${d.mine[id] ? ', answered' : ''}`} onClick={() => jump(k)} />
+              ))}
+            </div>
+            <button className="ghost" onClick={forward} disabled={n < 2} aria-label="Next card">Next ›</button>
+          </div>
+          <div className="deck-nav">
+            <span className="hint">{note || 'Swipe left for the next card, right to go back.'}</span>
+            <button className="ghost" onClick={reshuffle} disabled={!swappable.length}><Px name="shuffle" /> Shuffle</button>
+          </div>
+        </>
       )}
       <p className="hint" style={{ marginTop: 10 }}>
         {d.me.other_answers_left_today > 0
@@ -548,18 +869,12 @@ function Today(ctx) {
   );
 }
 
-const THEME_EMOJI = {
-  Sport: '⚽', Music: '🎵', 'Film & TV': '🎬', Travel: '✈️', Work: '💼', Dating: '💘', Food: '🍕',
-  Mysteries: '🛸', Future: '🚀', Nostalgia: '📼', Brands: '🏷️', 'Big debates': '🔥', Beliefs: '✨',
-  Ethics: '⚖️', Fitness: '🏃', Lifestyle: '🛋️', Money: '💷', Politics: '🗳️', Tech: '💻', 'Wild cards': '🃏',
-};
-
 function Questions(ctx) {
   const { d, inbox } = ctx;
   const [filter, setFilter] = useState('all');
   const [theme, setTheme] = useState(null);
   const sent = new Set(inbox.map(c => c.question_id));
-  const F = { all: 'All', open: 'Not answered', sent: 'Sent to you', standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive' };
+  const F = { all: 'All', open: 'Not answered', starred: 'Starred', sent: 'Sent to you', standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive' };
   const qs = d.questions.filter(q => !q.is_event && q.status === 'approved');
   const byTheme = {};
   for (const q of qs) {
@@ -569,14 +884,17 @@ function Questions(ctx) {
   }
   const themes = Object.values(byTheme).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
   const list = qs.filter(q => (!theme || q.category === theme)
-    && (filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)));
+    && (filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'starred' ? d.stars.has(q.id)
+      : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)));
+  const starredOpen = qs.filter(q => d.stars.has(q.id) && !d.mine[q.id]).length;
   const picked = byTheme[theme];
   return (
     <>
+      <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
       <div className="themes" role="group" aria-label="Themes">
         {themes.map(t => (
           <button key={t.name} className="theme" aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
-            <span className="e" aria-hidden="true">{THEME_EMOJI[t.name] || '💬'}</span>
+            <span className="e"><Px name={t.name} /></span>
             <span className="n">{t.done}/{t.total}</span>
             <b>{t.name}</b>
             <span className="bar"><i style={{ width: `${(100 * t.done) / t.total}%` }} /></span>
@@ -590,27 +908,92 @@ function Questions(ctx) {
         {picked
           ? <>{picked.name}: {picked.done} of {picked.total} answered · showing {list.length} · <button className="linkbtn" onClick={() => setTheme(null)}>All themes</button></>
           : <>{Object.keys(d.mine).length} answered · showing {list.length}</>}
+        <br />{starredOpen
+          ? `${starredOpen} starred to answer. They're dealt into Today after friends' questions.`
+          : 'Star a question to get it in your Today hand.'}
       </p>
-      <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} />)}</div>
-      <SuggestQuestion />
+      <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} star />)}</div>
     </>
   );
 }
 
-function SuggestQuestion() {
+// Write a question. For friends it's live straight away and goes to the friends
+// you pick; for everyone it waits for a moderator.
+function MakeQuestion({ d, reload, themes }) {
+  const [kind, setKind] = useState('friends');
   const [text, setText] = useState('');
+  const [value, setValue] = useState(null);
+  const [picked, setPicked] = useState([]);
+  const [timer, setTimer] = useState(1440);
+  const [theme, setTheme] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const fq = d.cfg.friend_question_cost ?? 3, pub = d.cfg.public_question_cost ?? 5;
+  const forFriends = kind === 'friends';
+  const cost = forFriends ? fq : pub;
+  const open = text.length > 0;
+  const waiting = d.questions.filter(q => q.created_by === d.me.id && q.status === 'pending');
+  const ready = text.trim().length >= 5 && (!forFriends || value !== null);
+  const [made, setMade] = useState(null);
+  const nameOf = h => d.friends.find(f => f && f.handle === h)?.display_name || h;
+
   async function submit(e) {
-    e.preventDefault(); setError(''); setNote('');
-    try { await call('submit_question', { p_text: text }); setText(''); setNote('Thanks. A moderator checks it before it goes live.'); }
-    catch (err) { setError(err.message); }
+    e.preventDefault(); setError(''); setNote(''); setBusy(true);
+    try {
+      if (forFriends) {
+        setMade(await call('make_friend_question', { p_text: text, p_value: value, p_handles: picked, p_minutes: timer }));
+        setNote(`${picked.length ? `Sent to ${picked.map(nameOf).join(', ')}. ` : 'Made. '}Share the link so anyone can answer it.`);
+      } else {
+        setMade(await call('submit_question', { p_text: text, p_category: theme || 'General' }));
+        setNote('Thanks. A moderator checks it before it goes live for everyone.');
+      }
+      setText(''); setValue(null); setPicked([]);
+      await reload();
+    } catch (err) { setError(err.message); }
+    setBusy(false);
   }
+
   return (
-    <form className="section" onSubmit={submit}><h2>Suggest a question</h2>
-      <div className="inline"><input required minLength={5} maxLength={140} placeholder="Is cereal a soup?" value={text} onChange={e => setText(e.target.value)} />
-        <button className="ghost">Send</button></div>
+    <form className="section make" onSubmit={submit}>
+      <h2>Make a question</h2>
+      <div className="seg" role="group" aria-label="Who it's for">
+        <button type="button" aria-pressed={forFriends} onClick={() => setKind('friends')}>For friends</button>
+        <button type="button" aria-pressed={!forFriends} onClick={() => setKind('public')}>For everyone</button>
+      </div>
+      <input required minLength={5} maxLength={140} aria-label="Your question" value={text} onChange={e => { setText(e.target.value); setMade(null); }}
+        placeholder={forFriends ? 'Would you eat a bug for a tenner?' : 'Is cereal a soup?'} />
+      <p className="hint">{forFriends
+        ? `Only your friends and people you share the link with can see it, so there's no approval. ${fq} slashes, however many friends you send it to, and passing it on is free.`
+        : `A moderator checks it before it goes live for everyone. ${pub} slashes, up to 3 a day.`}</p>
+      {!open ? null : forFriends ? (d.friends.length === 0
+        ? <p className="hint">Add friends in the Group tab first.</p>
+        : (
+          <>
+            <span className="label">Your answer</span>
+            <div className="seg" role="group" aria-label="Your answer">
+              <button type="button" aria-pressed={value === true} onClick={() => setValue(true)}>Yeah</button>
+              <button type="button" aria-pressed={value === false} onClick={() => setValue(false)}>Nah</button>
+            </div>
+            <span className="label">Send it to (optional: you can share a link instead)</span>
+            <FriendPicker d={d} picked={picked} setPicked={setPicked} />
+            <div className="seg" role="group" aria-label="Timer">
+              {TIMERS.map(([m, l]) => <button type="button" key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
+            </div>
+          </>
+        )) : (
+        <select value={theme} onChange={e => setTheme(e.target.value)} aria-label="Theme">
+          <option value="">Pick a theme (optional)</option>
+          {themes.map(t => <option key={t}>{t}</option>)}
+        </select>
+      )}
+      {open && <button className="solid" disabled={!ready || busy || cost > d.me.credits}>
+        {busy ? 'Sending…' : forFriends ? `${picked.length ? 'Make and send' : 'Make it'} · ${cost} slashes` : `Send for review · ${cost} slashes`}
+      </button>}
+      {open && cost > d.me.credits && <p className="hint">You have {d.me.credits} slashes. Answering a friend's question in time earns {d.cfg.challenge_reward ?? 2}.</p>}
       <Msg error={error} note={note} />
+      {made && d.byId[made] && <ShareLink q={d.byId[made]} />}
+      {waiting.length > 0 && <p className="hint">Waiting for a moderator: {waiting.map(q => `"${q.text}"`).join(', ')}</p>}
     </form>
   );
 }
@@ -756,7 +1139,7 @@ function Friends({ d, reload, open, now, inbox }) {
           {inbox.map(c => (
             <button key={c.id} className="row" onClick={() => open(c.question_id)}>
               <span><span className="t">{d.byId[c.question_id]?.text}</span><span className="hint">from {d.person[c.from_user]?.display_name}</span></span>
-              <span className="chip timer">⏱ {left(c.expires_at, now)}</span>
+              <span className="chip timer"><Px name="timer" scale={1} /> {left(c.expires_at, now)}</span>
             </button>
           ))}
         </div>
@@ -797,7 +1180,7 @@ function SentByMe({ d, now }) {
     <div className="section"><h2>You sent</h2>
       {sent.map(c => (
         <p className="hint" key={c.id}>{d.person[c.to_user]?.display_name} · {d.byId[c.question_id]?.text} · {
-          c.answered_at ? 'answered in time' : new Date(c.expires_at) > now ? `⏱ ${left(c.expires_at, now)}` : 'ran out of time'}</p>
+          c.answered_at ? 'answered in time' : new Date(c.expires_at) > now ? <><Px name="timer" scale={1} /> {left(c.expires_at, now)}</> : 'ran out of time'}</p>
       ))}
     </div>
   );
@@ -962,7 +1345,7 @@ function Groups({ d, reload, open }) {
                       <span key={a.handle} className={`vpill ${pillClass(q, a.value)}`}>{a.me ? 'You' : a.name}: {word(q, a.value)}</span>))}</span>
                   : <span className="hint">{r.answered} of {people.length} answered. Answer it to see who said what.</span>}
               </span>
-              <span>{r.answers ? '' : '🔒'}</span>
+              <span>{r.answers ? '' : <Px name="lock" label="Locked" />}</span>
             </button>
           );
         })}
@@ -978,7 +1361,7 @@ function Groups({ d, reload, open }) {
           <div className="chips" style={{ marginTop: 8 }}>
             {people.filter(p => p.id !== d.me.id).map(p => (
               <button key={p.id} className="chip" onClick={() => window.confirm(`Remove ${p.display_name} from ${g.name}? They won't be able to rejoin with the invite link.`)
-                && act('remove_member', { p_group: g.id, p_user: p.id }, `${p.display_name} was removed.`)}>{p.display_name} ✕</button>
+                && act('remove_member', { p_group: g.id, p_user: p.id }, `${p.display_name} was removed.`)}>{p.display_name} <Px name="close" scale={1} /></button>
             ))}
           </div>
         </details>
