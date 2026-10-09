@@ -364,7 +364,7 @@ test('leaving or being removed from a group ends the friendships it made', async
   await fails(m2.rpc('group_board', { p_group: g.id }), /not in that group/);
 });
 
-test('friend questions: no approval, only friends see them, 3 slashes plus 2 per extra friend', async () => {
+test('friend questions: no approval, only friends see them, 3 slashes to make and free to pass on', async () => {
   const id = async c => (await me(c)).id;
   const [writer, pal1, pal2, outsider] = [await user('writer', '1990-04-04'), await user('pal1', '1991-04-04'),
     await user('pal2', '1992-04-04'), await user('outsider', '1993-04-04')];
@@ -379,7 +379,7 @@ test('friend questions: no approval, only friends see them, 3 slashes plus 2 per
   await fails(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [outsider.handle] }), /only send questions to friends/);
   const q = await ok(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [pal1.handle, pal2.handle] }));
   const after1 = await me(writer);
-  assert.equal(before.credits - after1.credits, 5, '3 for the question and first friend, 2 for the second');
+  assert.equal(before.credits - after1.credits, 3, '3 slashes however many friends get it');
   assert.equal(after1.other_answers_left_today, before.other_answers_left_today, "the writer's own answer is outside the daily five");
 
   const row = await ok(pal1.from('questions').select('status,audience,category').eq('id', q));
@@ -395,12 +395,18 @@ test('friend questions: no approval, only friends see them, 3 slashes plus 2 per
   assert.equal((await me(pal1)).credits, pal1Before + 2);
   await fails(pal1.rpc('set_visibility', { p_question: q, p_visibility: 'public' }), /stay with friends/);
   assert.deepEqual(await ok(pal1.rpc('question_split', { p_question: q })), { yes: 1, no: 1, total: 2 });
-  // pal1 can't pass it on to someone who isn't the writer's friend.
+  // pal1 can't pass it on to someone who isn't the writer's friend, and passing it on is free.
   await fails(pal1.rpc('send_challenge', { p_handle: outsider.handle, p_question: q, p_minutes: 60 }), /friends of the person who wrote it/);
+  const pal3 = await user('pal3', '1994-04-04');
+  await ok(pal3.rpc('join_group', { p_code: g.invite_code }));
+  const pal1Now = (await me(pal1)).credits;
+  await ok(pal1.rpc('send_challenge', { p_handle: pal3.handle, p_question: q, p_minutes: 60 }));
+  assert.equal((await me(pal1)).credits, pal1Now, 'forwarding a friend question costs nothing');
 
   // Public questions still wait for a moderator, and cost 5 slashes.
   const pq = await ok(writer.rpc('submit_question', { p_text: 'Is a hot dog a sandwich?', p_category: 'Food' }));
   assert.equal((await me(writer)).credits, after1.credits - 5);
+  await ok(admin.from('credit_ledger').insert({ user_id: await id(writer), amount: -2, reason: 'test' }));
   assert.deepEqual(await ok(writer.from('questions').select('status,audience,category').eq('id', pq)), [{ status: 'pending', audience: 'public', category: 'Food' }]);
   assert.equal((await ok(pal1.from('questions').select('id').eq('id', pq))).length, 0, 'nobody else sees it before approval');
   await fails(writer.rpc('submit_question', { p_text: 'Is cereal a soup?' }), /costs 5 slashes and you have 0/);

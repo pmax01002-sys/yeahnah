@@ -23,7 +23,7 @@ tests/     23 end-to-end checks of the rules, run through the same API the app u
 - **Avatars**: each person's pick is saved with `set_avatar('cap-red')` and shown to anyone who can see their name. The picker comes with the retro restyle.
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
-- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes including sending it to one friend (2 for each extra). For everyone, it waits for a moderator and costs 5 slashes.
+- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. For everyone, it waits for a moderator and costs 5 slashes.
 - **Download my data** (everything held about you, as a file) and **delete my account** (UK GDPR).
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.

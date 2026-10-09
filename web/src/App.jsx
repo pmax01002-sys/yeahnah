@@ -470,7 +470,7 @@ function FriendPicker({ d, picked, setPicked, blocked = () => '' }) {
 
 // Send a question you've answered to friends.
 function SendPanel({ q, d, reload, friendAns, onClose }) {
-  const cost = d.cfg.send_cost ?? 2;
+  const cost = q.audience === 'friends' ? 0 : d.cfg.send_cost ?? 2;
   const [picked, setPicked] = useState([]);
   const [timer, setTimer] = useState(1440);
   const [busy, setBusy] = useState(false);
@@ -497,14 +497,14 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
 
   return (
     <div className="panel send">
-      <span className="label">Send to friends: {cost} slashes each. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
+      <span className="label">Send to friends: {cost ? `${cost} slashes each` : 'free for a friend question'}. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
       <FriendPicker d={d} picked={picked} setPicked={setPicked} blocked={blocked} />
       <div className="seg" role="group" aria-label="Timer">
         {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
       </div>
       <div className="inline">
         <button className="solid" disabled={!picked.length || busy || total > d.me.credits} onClick={send}>
-          {busy ? 'Sending…' : picked.length ? `Send to ${picked.length} · ${total} slashes` : 'Pick who gets it'}
+          {busy ? 'Sending…' : picked.length ? `Send to ${picked.length} · ${total ? `${total} slashes` : 'free'}` : 'Pick who gets it'}
         </button>
         <button className="linkbtn" onClick={onClose}>Close</button>
       </div>
@@ -765,6 +765,7 @@ function Questions(ctx) {
   const picked = byTheme[theme];
   return (
     <>
+      <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
       <div className="themes" role="group" aria-label="Themes">
         {themes.map(t => (
           <button key={t.name} className="theme" aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
@@ -787,7 +788,6 @@ function Questions(ctx) {
           : 'Star a question to get it in your Today hand.'}
       </p>
       <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} star />)}</div>
-      <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
     </>
   );
 }
@@ -804,9 +804,10 @@ function MakeQuestion({ d, reload, themes }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
-  const fq = d.cfg.friend_question_cost ?? 3, each = d.cfg.send_cost ?? 2, pub = d.cfg.public_question_cost ?? 5;
+  const fq = d.cfg.friend_question_cost ?? 3, pub = d.cfg.public_question_cost ?? 5;
   const forFriends = kind === 'friends';
-  const cost = forFriends ? fq + each * Math.max(picked.length - 1, 0) : pub;
+  const cost = forFriends ? fq : pub;
+  const open = text.length > 0;
   const waiting = d.questions.filter(q => q.created_by === d.me.id && q.status === 'pending');
   const ready = text.trim().length >= 5 && (!forFriends || (value !== null && picked.length > 0));
   const nameOf = h => d.friends.find(f => f && f.handle === h)?.display_name || h;
@@ -834,12 +835,12 @@ function MakeQuestion({ d, reload, themes }) {
         <button type="button" aria-pressed={forFriends} onClick={() => setKind('friends')}>For friends</button>
         <button type="button" aria-pressed={!forFriends} onClick={() => setKind('public')}>For everyone</button>
       </div>
-      <p className="hint">{forFriends
-        ? `Only your friends can see it, so there's no approval. ${fq} slashes, which includes sending it to one friend, then ${each} for each extra friend.`
-        : `A moderator checks it before it goes live for everyone. ${pub} slashes, up to 3 a day.`}</p>
       <input required minLength={5} maxLength={140} aria-label="Your question" value={text} onChange={e => setText(e.target.value)}
         placeholder={forFriends ? 'Would you eat a bug for a tenner?' : 'Is cereal a soup?'} />
-      {forFriends ? (d.friends.length === 0
+      <p className="hint">{forFriends
+        ? `Only your friends can see it, so there's no approval. ${fq} slashes, however many friends you send it to, and passing it on is free.`
+        : `A moderator checks it before it goes live for everyone. ${pub} slashes, up to 3 a day.`}</p>
+      {!open ? null : forFriends ? (d.friends.length === 0
         ? <p className="hint">Add friends in the Group tab first.</p>
         : (
           <>
@@ -860,10 +861,10 @@ function MakeQuestion({ d, reload, themes }) {
           {themes.map(t => <option key={t}>{t}</option>)}
         </select>
       )}
-      <button className="solid" disabled={!ready || busy || cost > d.me.credits}>
+      {open && <button className="solid" disabled={!ready || busy || cost > d.me.credits}>
         {busy ? 'Sending…' : forFriends ? `Make and send · ${cost} slashes` : `Send for review · ${cost} slashes`}
-      </button>
-      {cost > d.me.credits && <p className="hint">You have {d.me.credits} slashes. Answering a friend's question in time earns {d.cfg.challenge_reward ?? 2}.</p>}
+      </button>}
+      {open && cost > d.me.credits && <p className="hint">You have {d.me.credits} slashes. Answering a friend's question in time earns {d.cfg.challenge_reward ?? 2}.</p>}
       <Msg error={error} note={note} />
       {waiting.length > 0 && <p className="hint">Waiting for a moderator: {waiting.map(q => `"${q.text}"`).join(', ')}</p>}
     </form>

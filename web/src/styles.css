@@ -207,6 +207,7 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .picker .chip:disabled { background: transparent !important; border-style: dashed; }
 .make > input, .make > select { border: var(--b) solid var(--ink); background: var(--surface); border-radius: 0; padding: 8px 10px; width: 100%; }
 .make > .solid { align-self: flex-start; }
+.section.make { margin: 0 0 18px; }
 button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
 .chip.group { border-style: dashed; }
 
