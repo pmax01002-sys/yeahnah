@@ -411,7 +411,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
           : <p className="hint">You've used today's change of mind.</p>)}
         {canSend && (sending
           ? <SendPanel q={q} d={d} reload={reload} friendAns={friendAns} onClose={() => setSending(false)} />
-          : <button className="ghost send-btn" onClick={() => setSending(true)}>📨 Send to friends or a group</button>)}
+          : <button className="ghost send-btn" onClick={() => setSending(true)}><Px name="send" /> Send to friends or a group</button>)}
       </>
     );
   }
@@ -422,7 +422,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
         {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
           : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question' : `By ${d.person[q.created_by]?.display_name || 'a friend'}`}</span>}
-        {challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}
+        {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {left(challenge.expires_at, now)}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
       {challenge && !mine && <p className="hint">Answer before the timer runs out for {d.cfg.challenge_reward ?? 2} slashes. Doesn't count towards your daily answers.</p>}
@@ -714,7 +714,7 @@ function Today(ctx) {
           </div>
           <div className="deck-nav">
             <span className="hint">{note || 'Swipe left for the next card, right to go back.'}</span>
-            <button className="ghost" onClick={reshuffle} disabled={!swappable.length}>🔀 Shuffle</button>
+            <button className="ghost" onClick={reshuffle} disabled={!swappable.length}><Px name="shuffle" /> Shuffle</button>
           </div>
         </>
       )}
@@ -726,13 +726,6 @@ function Today(ctx) {
     </>
   );
 }
-
-const THEME_EMOJI = {
-  Sport: '⚽', Music: '🎵', 'Film & TV': '🎬', Travel: '✈️', Work: '💼', Dating: '💘', Food: '🍕',
-  Mysteries: '🛸', Future: '🚀', Nostalgia: '📼', Brands: '🏷️', 'Big debates': '🔥', Beliefs: '✨',
-  Ethics: '⚖️', Fitness: '🏃', Lifestyle: '🛋️', Money: '💷', Politics: '🗳️', Tech: '💻', 'Wild cards': '🃏',
-  Friends: '👯',
-};
 
 function Questions(ctx) {
   const { d, inbox } = ctx;
@@ -756,7 +749,7 @@ function Questions(ctx) {
       <div className="themes" role="group" aria-label="Themes">
         {themes.map(t => (
           <button key={t.name} className="theme" aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
-            <span className="e" aria-hidden="true">{THEME_EMOJI[t.name] || '💬'}</span>
+            <span className="e"><Px name={t.name} /></span>
             <span className="n">{t.done}/{t.total}</span>
             <b>{t.name}</b>
             <span className="bar"><i style={{ width: `${(100 * t.done) / t.total}%` }} /></span>
@@ -1037,7 +1030,7 @@ function SentByMe({ d, now }) {
     <div className="section"><h2>You sent</h2>
       {sent.map(c => (
         <p className="hint" key={c.id}>{d.person[c.to_user]?.display_name} · {d.byId[c.question_id]?.text} · {
-          c.answered_at ? 'answered in time' : new Date(c.expires_at) > now ? `⏱ ${left(c.expires_at, now)}` : 'ran out of time'}</p>
+          c.answered_at ? 'answered in time' : new Date(c.expires_at) > now ? <><Px name="timer" scale={1} /> {left(c.expires_at, now)}</> : 'ran out of time'}</p>
       ))}
     </div>
   );
