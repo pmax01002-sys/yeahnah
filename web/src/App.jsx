@@ -220,7 +220,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup, kinds, pocket] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -232,7 +232,11 @@ function useData() {
       supabase.from('stars').select('question_id'),
       supabase.from('credit_ledger').select('id').eq('reason', 'future_unlock').limit(1),
       call('todays_powerup').catch(() => null),
+      supabase.from('powerup_kinds').select('kind,name,rarity,slashes,effect,keeps_days'),
+      // Kept effect cards: a Wildcard keeps for 7 days, so a little over a week is enough.
+      supabase.from('pocket').select('*').gte('got_at', new Date(Date.now() - 9 * 864e5).toISOString()).order('got_at'),
     ]);
+    const kindOf = Object.fromEntries((kinds.data || []).map(k => [k.kind, k]));
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
     challenges.data.forEach(c => { ids.add(c.from_user); ids.add(c.to_user); });
@@ -259,6 +263,8 @@ function useData() {
       predictions: predictions.data,
       futureUnlocked: (unlock.data || []).length > 0,
       powerup,
+      kinds: kindOf,
+      pocket: (pocket.data || []).filter(r => kindOf[r.kind]).map(r => ({ ...r, ...kindOf[r.kind], kind: r.kind })),
       groups: groupRows.map(g => ({ ...g, members: memberRows.filter(m => m.group_id === g.id).map(m => m.user_id) })),
     });
   }, []);
@@ -438,12 +444,16 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
   const challenge = inbox.find(c => c.question_id === q.id);
   const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
 
+  // Peek and Mind reader show these before you answer.
+  const peeked = !!usedOn(d, 'peek', q.id), read = !!usedOn(d, 'mind_reader', q.id);
   useEffect(() => {
     setError(''); setNote('');
-    if (!mine) { setSplit(null); setFriendAns([]); return; }
-    call('question_split', { p_question: q.id }).then(setSplit).catch(() => {});
-    call('friends_answers', { p_question: q.id }).then(setFriendAns).catch(() => {});
-  }, [q.id, mine?.id]);
+    if (mine || peeked) call('question_split', { p_question: q.id }).then(setSplit).catch(() => {});
+    else setSplit(null);
+    if (mine || read) call('friends_answers', { p_question: q.id }).then(setFriendAns).catch(() => {});
+    else setFriendAns([]);
+  }, [q.id, mine?.id, peeked, read]);
+  const called = mine && usedOn(d, 'called_it', q.id);
 
   async function act(fn, args, done) {
     setError(''); setNote('');
@@ -467,6 +477,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
       : [[true, null, 'Yeah'], [false, null, 'Nah']];
     body = (
       <>
+        <CardPowers q={q} d={d} reload={reload} challenge={challenge} split={split} friendAns={friendAns} />
         <VisibilityPicker q={q} d={d} value={vis} onChange={setVis} label="Who sees your answer" />
         <div className={`answer-row${deck ? ' halves' : ''}`}>
           {opts.map(([v, emoji, label]) => (
@@ -501,6 +512,11 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
             </div>
           </>
         )}
+        {called && called.won != null && (
+          <div className="hook">{called.won
+            ? `Called it! ${called.result}% of everyone else said yeah and you guessed ${called.guess}%. +${called.won} slashes.`
+            : `Not this time: ${called.result}% of everyone else said yeah, and you guessed ${called.guess}%.`}</div>
+        )}
         {q.daily_date === todayUK() && split && pct < 50 && mine.value && split.total > 1 &&
           <div className="hook">You're one of the {pct}% who said yeah.</div>}
         {hidden && <p className="hint">You changed your mind, so this stays hidden from others until {new Date(mine.hidden_until).toLocaleDateString('en-GB')}.</p>}
@@ -513,7 +529,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
         )}
         {!deck && !mine.verified && (d.me.changes_left_today > 0
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
-              Change my answer to {word(q, !mine.value).toLowerCase()} (1 a day)</button>
+              Change my answer to {word(q, !mine.value).toLowerCase()} ({d.me.changes_left_today > 1 || inPocket(d, 'second_thoughts').length ? `${d.me.changes_left_today === 1 ? '1 change' : `${d.me.changes_left_today} changes`} left today` : '1 a day'})</button>
           : <p className="hint">You've used today's change of mind.</p>)}
         {q.created_by === d.me.id && <ShareLink q={q} />}
         {canSend && (sending
@@ -575,7 +591,11 @@ function FriendPicker({ d, picked, setPicked, blocked = () => '' }) {
 
 // Send a question you've answered to friends.
 function SendPanel({ q, d, reload, friendAns, onClose }) {
-  const cost = q.audience === 'friends' ? 0 : d.cfg.send_cost ?? 2;
+  // Free post makes the next paid send free, and the same question to anyone else in the next few minutes.
+  const recent = usedOn(d, 'free_post', q.id);
+  const freePost = q.audience !== 'friends' && (inPocket(d, 'free_post').length > 0
+    || (recent && Date.now() - new Date(recent.used_at) < (d.cfg.free_post_minutes ?? 5) * 60e3));
+  const cost = q.audience === 'friends' || freePost ? 0 : d.cfg.send_cost ?? 2;
   const [picked, setPicked] = useState([]);
   const [timer, setTimer] = useState(1440);
   const [busy, setBusy] = useState(false);
@@ -602,7 +622,7 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
 
   return (
     <div className="panel send">
-      <span className="label">Send to friends: {cost ? `${cost} slashes each` : 'free for a friend question'}. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
+      <span className="label">Send to friends: {cost ? `${cost} slashes each` : freePost ? 'free with your Free post' : 'free for a friend question'}. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
       <FriendPicker d={d} picked={picked} setPicked={setPicked} blocked={blocked} />
       <div className="seg" role="group" aria-label="Timer">
         {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
@@ -700,15 +720,48 @@ function dealable(d, today, skip) {
 // slashes to claim; rarer ones hold more. It's a card in the hand like any
 // other, under the id PU, and stays there once claimed.
 const PU = 'powerup';
-function PowerUpCard({ p, reload }) {
+const ukDate = t => new Date(t).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+
+// What each effect card does, and how it's used.
+function effectText(effect, cfg) {
+  const n = cfg.extra_hand_cards ?? 3;
+  return {
+    second_thoughts: ['One extra change of mind today, on top of your usual one.', 'It works by itself the next time you change an answer.'],
+    free_post: ['Your next send costs nothing, even to a whole group.', 'It works by itself on your next send that would cost slashes.'],
+    peek: ['See the crowd split on one question before you answer it.', 'Tap Peek on a card you haven\'t answered.'],
+    overtime: [`An extra ${cfg.overtime_minutes ?? 60} minutes on a question a friend sent you, so you can still earn the slashes.`, 'Tap Overtime on a friend\'s card with a timer.'],
+    mind_reader: ['See how your friends answered one question before you answer it.', 'Tap Mind reader on a card you haven\'t answered.'],
+    extra_hand: [`${n} more cards today, and ${n} more answers to go with them.`, 'They\'re dealt into your hand straight away.'],
+    called_it: [`Guess how many say yeah to today's question before you vote. Within ${cfg.called_it_window ?? 5} points of everyone else wins ${cfg.called_it_prize ?? 10} slashes.`,
+      'Make your guess on today\'s question card. A miss costs nothing.'],
+    wildcard: ['Turns into any other card you like.', 'Tap it in your pocket to pick what it becomes.'],
+  }[effect] || ['', ''];
+}
+// Effect cards still in your pocket, and the one used on a question.
+const inPocket = (d, effect) => d.pocket.filter(r => r.effect === effect && !r.used_at && r.expires_on >= todayUK());
+const usedOn = (d, effect, qid) => d.pocket.find(r => r.effect === effect && r.used_at && r.question_id === qid);
+function PowerUpCard({ p, d, reload }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const level = RARITY.indexOf(p.rarity) + 1;
   const unit = p.slashes === 1 ? 'slash' : 'slashes';
+  const [does, how] = effectText(p.effect, d.cfg);
+  const deal = p.effect === 'extra_hand';
   async function claim() {
     setError(''); setBusy(true);
     try { await call('claim_powerup'); await reload(); } catch (e) { setError(e.message); }
     setBusy(false);
+  }
+  let action, after;
+  if (!p.effect) {
+    action = `Claim ${p.slashes} ${unit}`;
+    after = `Claimed. ${p.slashes} ${unit} added.`;
+  } else if (deal) {
+    action = `Deal ${d.cfg.extra_hand_cards ?? 3} more cards`;
+    after = 'Dealt. Swipe on to play them.';
+  } else {
+    action = 'Keep it';
+    after = 'In your pocket.';
   }
   return (
     <div className={`card deck-card powerup ${p.rarity} ${p.kind}${p.claimed ? ' claimed' : ''}`}>
@@ -717,18 +770,126 @@ function PowerUpCard({ p, reload }) {
         <span className="pips" role="img" aria-label={`Rarity ${level} of 5`}>
           {RARITY.map((r, k) => <i key={r} className={k < level ? 'on' : ''} />)}
         </span>
-        <span className="chip">Power-up</span>
+        <span className="chip">{p.effect ? 'Effect' : 'Power-up'}</span>
       </div>
       <PowerUpArt p={p} />
       <h2 className="qtext">{p.name}</h2>
       <p className="hint">{p.blurb}</p>
+      {p.effect && <p className="fx">{does}</p>}
       {p.claimed
-        ? <p className="pu-done"><Px name="check" /> Claimed. {p.slashes} {unit} added.</p>
-        : <button className="solid pu-claim" onClick={claim} disabled={busy}>Claim {p.slashes} {unit}</button>}
+        ? <p className="pu-done"><Px name="check" /> {after}</p>
+        : <button className="solid pu-claim" onClick={claim} disabled={busy}>{action}</button>}
       <p className="hint">
-        {p.odds ? `${p.odds}% of power-ups are ${p.name}. ` : ''}
-        {p.claimed ? 'Another power-up could turn up in a future first hand.' : 'Gone at midnight if you don\'t claim it.'}
+        {p.effect && !deal ? `${how} ` : ''}
+        {p.claimed
+          ? (p.effect && !deal ? (p.keeps_days > 1 ? `Keeps for ${p.keeps_days} days.` : 'Use it by midnight.') : 'Another power-up could turn up in a future first hand.')
+          : `${p.odds ? `${p.odds}% of power-ups are ${p.name}. ` : ''}Gone at midnight if you don't ${deal ? 'use' : p.effect ? 'keep' : 'claim'} it.`}
       </p>
+      <Msg error={error} />
+    </div>
+  );
+}
+
+// Your pocket: effect cards you've kept and not used yet. Tap one to see what
+// it does; a Wildcard is used from here.
+function Pocket({ d, reload }) {
+  const [open, setOpen] = useState(null);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
+  const cards = d.pocket.filter(r => r.effect && !r.used_at && r.expires_on >= todayUK());
+  const kinds = [...new Set(cards.map(r => r.kind))];
+  if (!kinds.length && !note) return null;
+  const k = open && d.kinds[open];
+  async function become(pick) {
+    setError('');
+    try {
+      const r = await call('use_power', { p_kind: 'wildcard', p_pick: pick });
+      setOpen(null); setNote(`Your Wildcard became ${r.name}${r.effect ? '' : `: ${r.slashes} slashes added`}.`);
+      await reload();
+    } catch (e) { setError(e.message); }
+  }
+  return (
+    <div className="pocket">
+      {kinds.length > 0 && (
+        <div className="chips" aria-label="Your pocket">
+          <span className="label">Pocket</span>
+          {kinds.map(kind => {
+            const n = cards.filter(r => r.kind === kind).length;
+            return (
+              <button key={kind} className={`chip pocket-chip powerup ${d.kinds[kind].rarity}`} aria-pressed={open === kind}
+                onClick={() => { setNote(''); setError(''); setOpen(open === kind ? null : kind); }}>
+                {d.kinds[kind].name}{n > 1 ? ` ×${n}` : ''}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {k && (
+        <div className="panel">
+          <strong>{k.name}</strong>
+          <span>{effectText(k.effect, d.cfg)[0]}</span>
+          {k.effect === 'wildcard' ? (
+            <>
+              <span className="label">Turn it into</span>
+              <div className="chips">
+                {Object.values(d.kinds).filter(x => x.effect !== 'wildcard').map(x => (
+                  <button key={x.kind} className={`chip pocket-chip powerup ${x.rarity}`} onClick={() => become(x.kind)}>{x.name}</button>
+                ))}
+              </div>
+            </>
+          ) : <span className="hint">{effectText(k.effect, d.cfg)[1]}</span>}
+          <span className="hint">{cards.filter(r => r.kind === open).map(r => r.expires_on).sort()[0] > todayUK() ? 'Keeps for a few more days.' : 'Use it by midnight.'}</span>
+        </div>
+      )}
+      <Msg error={error} note={note} />
+    </div>
+  );
+}
+
+// Effect cards used on a question card: Peek, Mind reader, Overtime and Called it.
+function CardPowers({ q, d, reload, challenge, split, friendAns }) {
+  const [error, setError] = useState('');
+  const [guess, setGuess] = useState(50);
+  const today = q.daily_date === todayUK();
+  const peeked = usedOn(d, 'peek', q.id), read = usedOn(d, 'mind_reader', q.id), called = usedOn(d, 'called_it', q.id);
+  async function use(kind, extra) {
+    setError('');
+    try { await call('use_power', { p_kind: kind, p_question: q.id, ...extra }); await reload(); } catch (e) { setError(e.message); }
+  }
+  const buttons = [
+    !peeked && inPocket(d, 'peek').length > 0 && ['peek', 'Peek at the split'],
+    !read && inPocket(d, 'mind_reader').length > 0 && d.friends.length > 0 && ['mind_reader', 'Mind reader: friends\' answers'],
+    challenge && inPocket(d, 'overtime').length > 0 && ['overtime', `Overtime: +${d.cfg.overtime_minutes ?? 60} min`],
+  ].filter(Boolean);
+  const pct = split && split.total ? Math.round((100 * split.yes) / split.total) : 0;
+  const canCall = today && !called && inPocket(d, 'called_it').length > 0;
+  if (!buttons.length && !peeked && !read && !called && !canCall) return null;
+  return (
+    <div className="powers">
+      {peeked && split && (
+        <p className="hint"><strong>Peek:</strong> {split.total ? `${pct}% ${q.option_yes ? q.option_yes : 'yeah'}, ${100 - pct}% ${q.option_yes ? q.option_no : 'nah'}, from ${split.total} answer${split.total === 1 ? '' : 's'}.` : 'Nobody has answered yet.'}</p>
+      )}
+      {read && (
+        <p className="hint"><strong>Mind reader:</strong> {friendAns.length ? friendAns.map(f => `${f.display_name}: ${word(q, f.value)}`).join(', ') : 'None of your friends has answered yet.'}</p>
+      )}
+      {called && <p className="hint"><strong>Called it:</strong> you guessed {called.guess}% say yeah. Answer to see if you called it.</p>}
+      {canCall && (
+        <div className="guess">
+          <label className="label" htmlFor={`guess-${q.id}`}>Called it: what % say yeah?</label>
+          <div className="inline">
+            <input id={`guess-${q.id}`} type="range" min="0" max="100" value={guess} onChange={e => setGuess(+e.target.value)} />
+            <span className="n">{guess}%</span>
+            <button className="ghost" onClick={() => use('called_it', { p_guess: guess })}>Lock in</button>
+          </div>
+        </div>
+      )}
+      {buttons.length > 0 && (
+        <div className="chips">
+          {buttons.map(([kind, label]) => (
+            <button key={kind} className={`chip pocket-chip powerup ${d.kinds[kind]?.rarity}`} onClick={() => use(kind)}>{label}</button>
+          ))}
+        </div>
+      )}
       <Msg error={error} />
     </div>
   );
@@ -764,6 +925,7 @@ function Today(ctx) {
       && new Date(st.created_at).toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) === today)
     .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
     .map(st => st.question_id);
+  const extraToday = d.pocket.filter(r => r.effect === 'extra_hand' && r.used_at && ukDate(r.used_at) === today).length;
   // Five cards a day: today's question first, then what you've answered today,
   // then enough you haven't answered to make five, in a shuffled order.
   // Questions friends send you are extra cards on top.
@@ -771,7 +933,7 @@ function Today(ctx) {
     const kept = loadHand(uid, today);
     if (kept && Array.isArray(kept.ids)) {
       const ids = kept.ids.filter(id => (id === PU ? d.powerup : d.byId[id]));
-      return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids };
+      return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids, extra: kept.extra || 0 };
     }
     const first = daily ? [daily.id] : [];
     const done = answeredToday.filter(id => !first.includes(id));
@@ -781,8 +943,19 @@ function Today(ctx) {
     const ids = [...first, ...done, ...fresh];
     // Today's power-up, if there is one, goes somewhere after the first card you haven't answered.
     if (d.powerup) ids.splice(first.length + done.length + 1 + Math.floor(Math.random() * fresh.length), 0, PU);
-    return { ids, i: Math.max(ids.findIndex(id => !d.mine[id]), 0), seen: ids };
+    return { ids, i: Math.max(ids.findIndex(id => !d.mine[id]), 0), seen: ids, extra: extraToday };
   });
+  // Extra hand: more cards right after the one you're on.
+  useEffect(() => {
+    setHand(h => {
+      if (extraToday <= (h.extra || 0)) return h;
+      const n = (d.cfg.extra_hand_cards ?? 3) * (extraToday - (h.extra || 0));
+      const fresh = [...new Set([...dealable(d, today, new Set([...h.ids, ...h.seen])), ...dealable(d, today, new Set(h.ids))])].slice(0, n);
+      const ids = [...h.ids];
+      ids.splice(h.i + 1, 0, ...fresh);
+      return { ...h, ids, extra: extraToday, seen: [...new Set([...h.seen, ...fresh])] };
+    });
+  }, [extraToday]);
   // Something answered outside the stack today (in Questions, or on another device) joins it at the end.
   useEffect(() => {
     setHand(h => {
@@ -884,6 +1057,7 @@ function Today(ctx) {
       <div className="head">
         <span className="eyebrow">{date} · {n ? `Card ${hand.i + 1} of ${n} · ${done} answered` : 'All done'}</span>
       </div>
+      <Pocket d={d} reload={ctx.reload} />
       {!n ? (
         <div className="card deck-end">
           <h2 className="qtext">You've seen them all</h2>
@@ -893,7 +1067,7 @@ function Today(ctx) {
         <div className="deck">
           {hand.ids.filter(id => (id === PU ? d.powerup : d.byId[id])).map(id => (
             <div key={id} ref={motion.cardRef(id)} className={`slot${slots[id] === 0 ? ' top' : ''}`}>
-              {id === PU ? <PowerUpCard p={d.powerup} reload={ctx.reload} />
+              {id === PU ? <PowerUpCard p={d.powerup} d={d} reload={ctx.reload} />
                 : <QuestionCard q={d.byId[id]} deck noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />}
             </div>
           ))}

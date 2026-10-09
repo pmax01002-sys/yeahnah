@@ -237,6 +237,20 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .card.daily .panel, .card.friend .panel { background: transparent; }
 @media (prefers-reduced-motion: reduce) { .deck .split .y { animation: none !important; } }
 
+/* Effect cards in use: the pocket above Today's hand, and the powers on a question card.
+   (How the cards themselves look is in powerups.css.) */
+.card.powerup .fx { margin: 0; font-family: var(--display); font-weight: 600; font-size: 15px; line-height: 1.3; }
+.pocket { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.pocket .chips { align-items: center; }
+.pocket .label { margin-right: 2px; }
+.pocket .panel { gap: 6px; }
+.pocket-chip { border-left: 6px solid var(--rar, var(--ink)); font-size: 12.5px; padding: 1px 8px; }
+.powers { display: flex; flex-direction: column; gap: 8px; }
+.powers .hint strong { font-family: var(--display); }
+.guess .inline { gap: 10px; }
+.guess input[type="range"] { flex: 1; accent-color: var(--ink); }
+.guess .n { font-family: var(--display); font-weight: 700; min-width: 3.2em; text-align: right; }
+
 /* pixel icons (icons.jsx): ink is currentColor; on an inverted selection the red and green go to the same ink */
 .px { display: inline-block; vertical-align: middle; flex: none; }
 .chip .px { vertical-align: -1px; }

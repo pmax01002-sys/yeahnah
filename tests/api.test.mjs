@@ -481,7 +481,7 @@ test('question links: anyone with the link can see and answer, even signed out f
 test('power-ups: drawn once a day, claimed once for slashes', async () => {
   const [unlucky, lucky] = [await user('unlucky', '1990-08-08'), await user('lucky', '1991-08-08')];
   const kinds = await ok(lucky.from('powerup_kinds').select('kind,rarity,weight,slashes'));
-  assert.deepEqual(kinds.map(k => k.rarity).sort(), ['common', 'epic', 'legendary', 'rare', 'uncommon']);
+  assert.deepEqual([...new Set(kinds.map(k => k.rarity))].sort(), ['common', 'epic', 'legendary', 'rare', 'uncommon']);
 
   // No power-up today stays that way, even if the odds change later in the day.
   await setPowerupChance(0);
@@ -529,6 +529,114 @@ test('unlimited slashes: spending is free for chosen accounts, and only the owne
   await ok(admin.from('unlimited_slashes').delete().eq('user_id', p.id));
   await ok(rich.rpc('submit_question', { p_text: 'Should every town have a bandstand?' }));
   assert.equal((await me(rich)).credits, 995);
+});
+
+test('effect cards: kept in a pocket, used on a question, and checked on the server', async () => {
+  const ukToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const give = async (c, kind) => ok(admin.from('pocket').insert({ user_id: (await me(c)).id, kind, expires_on: ukToday }));
+  const host = await user('fxhost', '1990-10-10');
+  const [b, c] = [await user('fxb', '1991-10-10'), await user('fxc', '1992-10-10')];
+  const g = await ok(host.rpc('create_group', { p_name: 'Effects' }));
+  await ok(b.rpc('join_group', { p_code: g.invite_code }));
+  await ok(c.rpc('join_group', { p_code: g.invite_code }));
+  const [q1, q2, q3, q4] = others.slice(6, 10);
+
+  // Claiming an effect card puts it in your pocket instead of adding slashes.
+  await setPowerupChance(100);
+  await ok(host.rpc('todays_powerup'));
+  await ok(admin.from('powerups').update({ kind: 'peek' }).eq('user_id', (await me(host)).id));
+  assert.equal((await ok(host.rpc('todays_powerup'))).effect, 'peek');
+  assert.equal(await ok(host.rpc('claim_powerup')), 0);
+  const pocket = await ok(host.from('pocket').select('kind,used_at,expires_on'));
+  assert.deepEqual(pocket, [{ kind: 'peek', used_at: null, expires_on: ukToday }]);
+  await fails(host.from('pocket').insert({ user_id: (await me(host)).id, kind: 'wildcard', expires_on: ukToday }));
+  assert.equal((await ok(b.from('pocket').select('id'))).length, 0, "nobody sees someone else's pocket");
+  await setPowerupChance(50);
+
+  // Peek: the split before answering, once per card, and again for free on the same question.
+  assert.equal(await ok(host.rpc('question_split', { p_question: q1 })), null);
+  const split = await ok(host.rpc('use_power', { p_kind: 'peek', p_question: q1 }));
+  assert.ok(split.total >= 0);
+  assert.deepEqual(await ok(host.rpc('question_split', { p_question: q1 })), split);
+  await ok(host.rpc('use_power', { p_kind: 'peek', p_question: q1 }));
+  await fails(host.rpc('use_power', { p_kind: 'peek', p_question: q2 }), /don't have a Peek/);
+  await ok(host.rpc('answer', { p_question: q1, p_value: true, p_visibility: 'friends' }));
+  await fails(host.rpc('use_power', { p_kind: 'peek', p_question: q1 }), /already answered/);
+
+  // Mind reader: friends' answers before answering.
+  assert.deepEqual(await ok(b.rpc('friends_answers', { p_question: q1 })), []);
+  await fails(b.rpc('use_power', { p_kind: 'mind_reader', p_question: q1 }), /don't have a Mind reader/);
+  await give(b, 'mind_reader');
+  const read = await ok(b.rpc('use_power', { p_kind: 'mind_reader', p_question: q1 }));
+  assert.deepEqual(read.map(r => [r.handle, r.value]), [[host.handle, true]]);
+  assert.equal((await ok(b.rpc('friends_answers', { p_question: q1 }))).length, 1);
+
+  // Free post: the next paid send is free, and so is the same question to the rest of the group.
+  const credits = async x => (await me(x)).credits;
+  await give(host, 'free_post');
+  const before = await credits(host);
+  await ok(host.rpc('send_challenge', { p_handle: c.handle, p_question: q1, p_minutes: 60 }));
+  await ok(host.rpc('send_challenge', { p_handle: b.handle, p_question: q1, p_minutes: 60 }));
+  assert.equal(await credits(host), before, 'the rest of the group in the same go is free too');
+  await ok(host.rpc('answer', { p_question: q2, p_value: false, p_visibility: 'friends' }));
+  await ok(host.rpc('send_challenge', { p_handle: b.handle, p_question: q2, p_minutes: 1440 }));
+  assert.equal(await credits(host), before - 2, 'only the send after the free one costs');
+
+  // Overtime: an hour more on a question a friend sent you.
+  const exp = async () => new Date((await ok(c.from('challenges').select('expires_at').eq('question_id', q1).single())).expires_at).getTime();
+  const t0 = await exp();
+  await fails(c.rpc('use_power', { p_kind: 'overtime', p_question: q1 }), /don't have an Overtime/);
+  await give(c, 'overtime');
+  await fails(c.rpc('use_power', { p_kind: 'overtime', p_question: q3 }), /friend sent you/);
+  await ok(c.rpc('use_power', { p_kind: 'overtime', p_question: q1 }));
+  assert.equal(await exp() - t0, 60 * 60e3);
+
+  // Second thoughts: one more change of mind today.
+  await ok(host.rpc('answer', { p_question: q1, p_value: false }));
+  await fails(host.rpc('answer', { p_question: q1, p_value: true }), /change of mind/);
+  await give(host, 'second_thoughts');
+  assert.equal((await me(host)).changes_left_today, 1);
+  await ok(host.rpc('answer', { p_question: q1, p_value: true }));
+  assert.equal((await me(host)).changes_left_today, 0);
+  await fails(host.rpc('answer', { p_question: q2, p_value: true }), /change of mind/);
+
+  // Wildcard: becomes Extra hand (three more answers today), or a Golden slash.
+  const left = (await me(c)).other_answers_left_today;
+  await fails(c.rpc('use_power', { p_kind: 'wildcard', p_pick: 'extra_hand' }), /don't have a Wildcard/);
+  await give(c, 'wildcard'); await give(c, 'wildcard');
+  await fails(c.rpc('use_power', { p_kind: 'wildcard', p_pick: 'wildcard' }), /Pick which card/);
+  assert.equal((await ok(c.rpc('use_power', { p_kind: 'wildcard', p_pick: 'extra_hand' }))).name, 'Extra hand');
+  assert.equal((await me(c)).other_answers_left_today, left + 3);
+  const cc = await credits(c);
+  await ok(c.rpc('use_power', { p_kind: 'wildcard', p_pick: 'golden_slash' }));
+  assert.equal(await credits(c), cc + 10);
+  await fails(c.rpc('use_power', { p_kind: 'extra_hand' }), /works by itself/);
+
+  // Called it: guess today's split before voting; within 5 points of everyone else wins 10.
+  for (const n of ['fxv1', 'fxv2', 'fxv3']) await ok((await user(n, '1990-01-01')).rpc('answer', { p_question: daily.id, p_value: n !== 'fxv3' }));
+  const rows = await ok(admin.from('statements').select('value').eq('question_id', daily.id).is('superseded_at', null));
+  const pct = Math.round((100 * rows.filter(r => r.value).length) / rows.length);
+  await fails(b.rpc('use_power', { p_kind: 'called_it', p_question: daily.id, p_guess: pct }), /don't have a Called it/);
+  await give(b, 'called_it');
+  await fails(b.rpc('use_power', { p_kind: 'called_it', p_question: q4, p_guess: 50 }), /today's question/);
+  await fails(b.rpc('use_power', { p_kind: 'called_it', p_question: daily.id, p_guess: 101 }), /0 to 100/);
+  await ok(b.rpc('use_power', { p_kind: 'called_it', p_question: daily.id, p_guess: Math.min(100, pct + 4) }));
+  const bc = await credits(b);
+  await ok(b.rpc('answer', { p_question: daily.id, p_value: true }));
+  assert.equal(await credits(b), bc + 10);
+  const [called] = await ok(b.from('pocket').select('guess,result,won').eq('kind', 'called_it'));
+  assert.deepEqual(called, { guess: Math.min(100, pct + 4), result: pct, won: 10 });
+
+  // With too few other answers to call, the card comes back for tomorrow.
+  await ok(admin.from('app_config').update({ value: 100000 }).eq('key', 'called_it_min_answers'));
+  await give(c, 'called_it');
+  await ok(c.rpc('use_power', { p_kind: 'called_it', p_question: daily.id, p_guess: 50 }));
+  await ok(c.rpc('answer', { p_question: daily.id, p_value: false }));
+  const [back] = await ok(c.from('pocket').select('used_at,expires_on').eq('kind', 'called_it'));
+  assert.equal(back.used_at, null);
+  assert.ok(back.expires_on > ukToday);
+  await ok(admin.from('app_config').update({ value: 3 }).eq('key', 'called_it_min_answers'));
+  assert.ok((await ok(c.rpc('export_my_data'))).pocket.length >= 4);
 });
 
 test('feedback lands in a table only its author (and the owner) can read', async () => {
