@@ -56,6 +56,16 @@ Run only the migration files newer than your setup, in date order, in the SQL Ed
 4. Add two environment variables: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` with the values from step 1.5.
 5. Deploy. You get a `https://<name>.pages.dev` link to share. Every push to GitHub redeploys.
 
+#### Your own address (optional)
+
+To serve the demo from a domain you own, use a subdomain such as `yeahnah.cookiebadboy.com` so anything already on the main domain keeps working.
+
+1. In Cloudflare, open **Workers & Pages**, pick the project, go to **Custom domains** and choose **Set up a custom domain**. Enter `yeahnah.cookiebadboy.com` and continue. Do this before touching DNS; a DNS record pointing at Pages without this step gives a 522 error.
+2. If the domain's DNS is already on Cloudflare, it adds the record for you. If not, add a **CNAME** record at your domain registrar: name `yeahnah`, target `<project>.pages.dev`. Cloudflare then checks it and issues the HTTPS certificate on its own.
+3. In Supabase, go to **Authentication > URL Configuration**. Set **Site URL** to `https://yeahnah.cookiebadboy.com` and add `https://yeahnah.cookiebadboy.com/**` under **Redirect URLs**, so sign-in emails link to the right place once you turn them on.
+
+The `pages.dev` link keeps working. Invite links use whichever address the inviter has open, so share the new one. Sign-ins are kept per address, so people who signed in on the old link sign in once more on the new one.
+
 The anon key is meant to be public: row-level security in the database decides what each signed-in person can see. Never put the `service_role` key in the app.
 
 On a phone, open the link and "Add to Home Screen" to get an app icon.
