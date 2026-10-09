@@ -255,8 +255,8 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
   animation: pu-shine 2.6s linear infinite;
 }
 @keyframes pu-shine { from { background-position: 100% 0, 0 0, 0 0; } to { background-position: -50% 0, 0 0, 0 0; } }
-.powerup.claimed .pu-art { background: var(--dither); color: var(--ink); animation: none; }
-.powerup.claimed .pu-art .n { text-shadow: 3px 3px 0 var(--surface); }
+.powerup.claimed .pu-art { background: var(--surface); color: var(--ink); border-style: dashed; animation: none; }
+.powerup.claimed .pu-art .n { text-shadow: none; }
 .pu-claim { align-self: stretch; font-size: 18px; padding: 12px 14px; }
 .pu-done { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--display); font-weight: 600; }
 .dot.powerup { background: var(--rar); }
