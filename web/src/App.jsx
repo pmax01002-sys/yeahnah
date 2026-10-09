@@ -583,11 +583,12 @@ function interleave(qs) {
 // Questions that can be dealt: approved, unanswered, not today's or a future
 // daily, and sensitive ones only if you've opted in.
 function dealable(d, today, skip) {
-  const ids = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && q.audience !== 'friends' && !d.mine[q.id]
+  const qs = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
     && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
-    && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in))).map(q => q.id);
-  // Starred ones come first.
-  return [...ids.filter(id => d.stars.has(id)), ...ids.filter(id => !d.stars.has(id))];
+    && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
+  // Questions friends wrote come first, then starred ones, then the rest.
+  const rank = q => (q.audience === 'friends' ? 0 : d.stars.has(q.id) ? 1 : 2);
+  return [0, 1, 2].flatMap(r => qs.filter(q => rank(q) === r).map(q => q.id));
 }
 
 // Today's hand is kept on this device, so it survives tab switches and reloads.
@@ -639,24 +640,30 @@ function Today(ctx) {
 
   const n = hand.ids.length;
   const q = d.byId[hand.ids[hand.i]];
-  const counts = id => id === daily?.id || inboxIds.includes(id);
+  const byFriend = id => d.byId[id]?.audience === 'friends';
+  // Today's question, questions friends sent you and friends wrote don't use up your daily answers.
+  const counts = id => id === daily?.id || inboxIds.includes(id) || byFriend(id);
   const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
-  // Today's question, friends' questions and starred ones stay put until answered.
+  // Today's question, questions friends sent and starred ones stay put until answered.
   const canSwap = id => !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
   const swappable = hand.ids.filter(canSwap);
-  // Questions starred since the hand was dealt take the place of unstarred,
-  // unanswered cards, starting from the back and never the card on top.
+  // Questions friends wrote and questions starred since the hand was dealt take the
+  // place of other unanswered cards, starting from the back and never the card on top.
+  const friendQs = d.questions.filter(x => x.audience === 'friends' && !d.mine[x.id]).map(x => x.id);
   useEffect(() => {
     setHand(h => {
-      const want = dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id));
+      const want = [
+        ...dealable(d, today, new Set([...h.ids, ...h.seen])).filter(byFriend),
+        ...dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id) && !byFriend(id)),
+      ];
       if (!want.length) return h;
       const ids = [...h.ids];
       for (let k = ids.length - 1; k >= 0 && want.length; k--) {
-        if (k !== h.i && canSwap(ids[k])) ids[k] = want.shift();
+        if (k !== h.i && canSwap(ids[k]) && !byFriend(ids[k])) ids[k] = want.shift();
       }
       return ids.join() === h.ids.join() ? h : { ...h, ids, seen: [...new Set([...h.seen, ...ids])] };
     });
-  }, [[...d.stars].join()]);
+  }, [[...d.stars].join(), friendQs.join()]);
   const done = hand.ids.filter(id => d.mine[id]).length;
 
   const step = by => setHand(h => ({ ...h, i: (h.i + by + h.ids.length) % h.ids.length }));
@@ -676,8 +683,9 @@ function Today(ctx) {
     if (k === hand.i) return;
     setNote(''); motion.dir(k < hand.i ? 1 : -1); setHand(h => ({ ...h, i: k }));
   }
-  // Shuffle swaps every unanswered card for one you haven't seen today, keeping
-  // answered cards, today's question and questions friends sent.
+  // Shuffle swaps every unanswered card for one you haven't seen today, friends'
+  // questions first, keeping answered cards, today's question, questions friends
+  // sent and starred ones.
   function reshuffle() {
     const fresh = dealable(d, today, new Set([...hand.ids, ...hand.seen]));
     const pool = fresh.length >= swappable.length ? fresh
@@ -784,7 +792,7 @@ function Questions(ctx) {
           ? <>{picked.name}: {picked.done} of {picked.total} answered · showing {list.length} · <button className="linkbtn" onClick={() => setTheme(null)}>All themes</button></>
           : <>{Object.keys(d.mine).length} answered · showing {list.length}</>}
         <br />{starredOpen
-          ? `${starredOpen} starred to answer. They're dealt into Today first.`
+          ? `${starredOpen} starred to answer. They're dealt into Today after friends' questions.`
           : 'Star a question to get it in your Today hand.'}
       </p>
       <div className="rows">{list.map(q => <Row key={q.id} q={q} {...ctx} star />)}</div>
