@@ -219,7 +219,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config, stars] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -229,6 +229,7 @@ function useData() {
       supabase.from('group_members').select('group_id,user_id').order('joined_at'),
       supabase.from('app_config').select('key,value'),
       supabase.from('stars').select('question_id'),
+      supabase.from('credit_ledger').select('id').eq('reason', 'future_unlock').limit(1),
     ]);
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
@@ -254,6 +255,7 @@ function useData() {
       friends: [...iFollow].filter(id => followsMe.has(id)).map(id => person[id]),
       challenges: challenges.data,
       predictions: predictions.data,
+      futureUnlocked: (unlock.data || []).length > 0,
       groups: groupRows.map(g => ({ ...g, members: memberRows.filter(m => m.group_id === g.id).map(m => m.user_id) })),
     });
   }, []);
@@ -297,7 +299,7 @@ function Signed() {
 
   const inbox = d.challenges.filter(c => c.to_user === d.me.id && !c.answered_at && new Date(c.expires_at) > now);
   const ctx = { d, reload, open: setSheet, now, inbox };
-  const TABS = [['today', 'today', 'Today'], ['questions', 'questions', 'Questions'], ['predict', 'predict', 'Predict'], ['friends', 'group', 'Group'], ['profile', 'profile', 'Profile']];
+  const TABS = [['today', 'today', 'Today'], ['questions', 'questions', 'Questions'], ['predict', 'predict', 'Future'], ['friends', 'group', 'Group'], ['profile', 'profile', 'Profile']];
 
   return (
     <div className="app">
@@ -313,7 +315,7 @@ function Signed() {
       <main className="screen" key={tab}>
         {tab === 'today' && <Today {...ctx} />}
         {tab === 'questions' && <Questions {...ctx} />}
-        {tab === 'predict' && <Predict {...ctx} />}
+        {tab === 'predict' && (d.futureUnlocked ? <Predict {...ctx} /> : <FutureLocked {...ctx} />)}
         {tab === 'friends' && <Friends {...ctx} />}
         {tab === 'profile' && <Profile {...ctx} />}
       </main>
@@ -981,6 +983,49 @@ function MakeQuestion({ d, reload, themes }) {
   );
 }
 
+// Future starts locked: it costs slashes once, which keeps throwaway accounts
+// out, and needs a date of birth showing 18 or over. The server checks both.
+function FutureLocked({ d, reload }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const cost = d.cfg.future_unlock_cost ?? 100;
+  const enough = d.me.credits >= cost;
+  const ready = enough && d.me.is_adult;
+  async function unlock() {
+    setError(''); setBusy(true);
+    try { await call('unlock_future'); await reload(); }
+    catch (e) { setError(e.message); }
+    setBusy(false);
+  }
+  const Need = ({ ok, children }) => <li><Px name={ok ? 'check' : 'cross'} label={ok ? 'Done' : 'Not yet'} /> {children}</li>;
+  return (
+    <>
+      <div className="section"><h2>Future is locked</h2>
+        <div className="panel">
+          <span>Guess how everyone will answer today's question, what your friends will say, and what will happen in the world. Every guess builds a hit rate on your profile.</span>
+          <ul className="needs">
+            <Need ok={enough}>{cost} slashes, once. You have {d.me.credits}.</Need>
+            <Need ok={d.me.is_adult}>A date of birth on your profile showing you're 18 or over.</Need>
+          </ul>
+          <button className="solid" disabled={!ready || busy} onClick={unlock}>{busy ? 'Unlocking…' : `Unlock Future · ${cost} slashes`}</button>
+          {!enough && <p className="hint">Answering a friend's question in time earns {d.cfg.challenge_reward ?? 2}. New accounts start with {d.cfg.signup_credits ?? 10}, so the unlock keeps throwaway accounts out.</p>}
+          <Msg error={error} />
+        </div>
+      </div>
+      <NoHouse />
+    </>
+  );
+}
+
+const NoHouse = () => (
+  <div className="section"><h2>There's no house</h2>
+    <div className="panel">
+      <span>At a bookmaker, the house sets the odds and builds in an edge, so over time the house wins. A prediction market has no house: people predict against each other, the odds are simply what the crowd thinks, and nobody gains when you're wrong.</span>
+      <span>Future works the same way. Nobody here sets odds or takes a cut. Your guesses are scored only against what really happens, and your hit rate is yours.</span>
+    </div>
+  </div>
+);
+
 function Predict({ d, reload }) {
   const [error, setError] = useState('');
   const [friend, setFriend] = useState(d.friends[0]?.handle || '');
@@ -1024,7 +1069,7 @@ function Predict({ d, reload }) {
         <div className="stat"><b>{hr.correct}/{hr.resolved}</b><span>right</span></div>
         <div className="stat"><b>{hr.made}</b><span>guesses</span></div>
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>Guessing doesn't use slashes. Your hit rate shows on your profile.</p>
+      <p className="hint" style={{ marginTop: 8 }}>Guesses are free now Future is unlocked. Your hit rate shows on your profile.</p>
       <Msg error={error} />
 
       {daily && (
@@ -1060,6 +1105,8 @@ function Predict({ d, reload }) {
           </div>
         ))}
       </div>
+
+      <NoHouse />
     </>
   );
 }
