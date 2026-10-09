@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, configured, call } from './supabase.js';
 import { Px } from './icons.jsx';
 import { useDeckMotion } from './deckMotion.js';
+import { PowerUpArt, RARITY } from './powerupArt.jsx';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -699,7 +700,6 @@ function dealable(d, today, skip) {
 // slashes to claim; rarer ones hold more. It's a card in the hand like any
 // other, under the id PU, and stays there once claimed.
 const PU = 'powerup';
-const RARITY = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
 function PowerUpCard({ p, reload }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -711,7 +711,7 @@ function PowerUpCard({ p, reload }) {
     setBusy(false);
   }
   return (
-    <div className={`card deck-card powerup ${p.rarity}${p.claimed ? ' claimed' : ''}`}>
+    <div className={`card deck-card powerup ${p.rarity} ${p.kind}${p.claimed ? ' claimed' : ''}`}>
       <div className="chips">
         <span className="chip rarity">{p.rarity}</span>
         <span className="pips" role="img" aria-label={`Rarity ${level} of 5`}>
@@ -719,10 +719,7 @@ function PowerUpCard({ p, reload }) {
         </span>
         <span className="chip">Power-up</span>
       </div>
-      <div className="pu-art" aria-hidden="true">
-        <span className="n">+{p.slashes}</span>
-        <span className="w">{unit}</span>
-      </div>
+      <PowerUpArt p={p} />
       <h2 className="qtext">{p.name}</h2>
       <p className="hint">{p.blurb}</p>
       {p.claimed
