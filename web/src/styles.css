@@ -11,6 +11,7 @@
   --body: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   --mono: "Pixelify Sans", ui-monospace, Menlo, monospace;
   --b: 2px;
+  --daily: #FFE3F3;                                       /* tint for today's question, from the desk pink */
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23C8352B' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");    /* the pixel Y/N, 20x7 */
   color-scheme: light;
 }
@@ -20,6 +21,7 @@
   --desk: #13060E; --dot: #4D1736;
   --frame: #0C120D; --surface: #0C120D; --ink: #9FF58A; --muted: #9FF58A; --line: #9FF58A;
   --hi: #9FF58A; --hi-ink: #0C120D;
+  --daily: #1E2A12;
   --yes: #9FF58A; --no: #FFB35C; --oa: #9FF58A; --ob: #FFB35C; --sen: #FF6EC7;
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%239FF58A' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%239FF58A' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FFB35C' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");
   color-scheme: dark;
@@ -180,3 +182,7 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .answer-row.halves .big { min-height: clamp(120px, 26vh, 220px); }
 .deck-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
 .deck-end { text-align: left; }
+
+/* Today's question stands out with a tint. */
+.card.daily { background: var(--daily); }
+.chip.daily { background: var(--daily); font-weight: 600; }

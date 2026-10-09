@@ -420,8 +420,11 @@ function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
   }
 
   return (
-    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}`}>
-      <Chips q={q}>{challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}</Chips>
+    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${q.daily_date === todayUK() ? ' daily' : ''}`}>
+      <Chips q={q}>
+        {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
+        {challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}
+      </Chips>
       <h2 className="qtext">{q.text}</h2>
       {challenge && !mine && <p className="hint">Sent by {d.person[challenge.from_user]?.display_name}. Answer before the timer runs out for 2 slashes. Doesn't count towards your daily answers.</p>}
       {body}
@@ -445,8 +448,26 @@ function Row({ q, d, open, extra }) {
 // Tabs
 // ---------------------------------------------------------------------------
 
-// Unanswered questions, mixed so the same theme doesn't come up twice in a row.
+function shuffle(xs) {
+  const a = [...xs];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// Puts each id at a random spot among the next few cards after `from`, so
+// questions friends send turn up soon (they're on a timer) but mixed in.
+function shuffleIn(deck, newIds, from) {
+  const out = [...deck];
+  for (const id of newIds) {
+    const at = from + 1 + Math.floor(Math.random() * Math.min(4, out.length - from));
+    out.splice(Math.min(at, out.length), 0, id);
+  }
+  return out;
+}
+
+// Unanswered questions in a random order, mixed so the same theme doesn't come up twice in a row.
 function interleave(qs) {
+  qs = shuffle(qs);
   const byCat = {};
   qs.forEach(q => (byCat[q.category] || (byCat[q.category] = [])).push(q));
   const lists = Object.values(byCat), out = [];
@@ -458,16 +479,22 @@ function Today(ctx) {
   const { d, inbox } = ctx;
   const today = todayUK();
   const daily = d.questions.find(q => q.daily_date === today);
-  // The deck is fixed when the tab opens: today's question first, then questions
-  // friends sent you, then everything else you haven't answered.
-  const [ids] = useState(() => {
-    const sent = inbox.map(c => c.question_id).filter(id => !d.mine[id]);
+  // The deck is dealt when the tab opens: today's question first, then everything
+  // you haven't answered in a shuffled order, with questions friends sent you
+  // mixed into the first few cards.
+  const [ids, setIds] = useState(() => {
+    const sent = [...new Set(inbox.map(c => c.question_id))].filter(id => !d.mine[id]);
     const rest = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
       && (!q.daily_date || q.daily_date < today) && !sent.includes(q.id)
-      && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
-    return [...new Set([daily?.id, ...sent, ...rest.map(q => q.id)].filter(Boolean))];
+      && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in))).map(q => q.id);
+    return daily ? shuffleIn([daily.id, ...rest.filter(id => id !== daily.id)], sent, 0) : shuffleIn(rest, sent, -1);
   });
   const [i, setI] = useState(0);
+  // A friend's question that arrives while the deck is open is shuffled in just ahead.
+  useEffect(() => {
+    const fresh = [...new Set(inbox.map(c => c.question_id))].filter(id => !d.mine[id] && !ids.slice(i).includes(id));
+    if (fresh.length) setIds(cur => shuffleIn(cur.filter((id, k) => k <= i || !fresh.includes(id)), fresh, i));
+  }, [inbox.map(c => c.id).join()]);
   const [drag, setDrag] = useState(null);
   const [leaving, setLeaving] = useState(0);
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
