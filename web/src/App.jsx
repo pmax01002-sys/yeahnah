@@ -190,7 +190,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -198,6 +198,7 @@ function useData() {
       supabase.from('predictions').select('*').order('created_at', { ascending: false }),
       supabase.from('groups').select('id,name,invite_code,created_by').order('created_at'),
       supabase.from('group_members').select('group_id,user_id').order('joined_at'),
+      supabase.from('app_config').select('key,value'),
     ]);
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
@@ -214,6 +215,7 @@ function useData() {
     const followsMe = new Set(follows.data.filter(f => f.followed === me.id).map(f => f.follower));
     setD({
       me,
+      cfg: Object.fromEntries((config.data || []).map(c => [c.key, c.value])),
       questions: questions.data,
       byId: Object.fromEntries(questions.data.map(q => [q.id, q])),
       mine: Object.fromEntries(mine.data.map(s => [s.question_id, s])),
@@ -298,8 +300,34 @@ function Signed() {
 // The question card: answer, see the split, set who sees it, send to a friend
 // ---------------------------------------------------------------------------
 
-function QuestionCard({ q, small, d, reload, now, inbox }) {
+// Who sees a new answer: sensitive ones start private; otherwise whatever you
+// picked on your last vote carries over, or the app's default before that.
+function startingVisibility(q, d) {
+  if (q.sensitivity === 'sensitive') return 'private';
+  const last = Object.values(d.mine)
+    .filter(s => s.source === 'app' && d.byId[s.question_id]?.sensitivity !== 'sensitive')
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+  const v = last ? last.visibility
+    : q.sensitivity === 'personal' || d.cfg.new_answers_public === 0 ? 'friends' : 'public';
+  return v === 'public' && !d.me.is_adult ? 'friends' : v;
+}
+
+function VisibilityPicker({ d, value, onChange, label }) {
+  return (
+    <>
+      <span className="label">{label}</span>
+      <div className="seg" role="group" aria-label="Visibility">
+        {['public', 'friends', 'private'].filter(v => d.me.is_adult || v !== 'public').map(v => (
+          <button key={v} aria-pressed={value === v} onClick={() => onChange(v)}>{v[0].toUpperCase() + v.slice(1)}</button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function QuestionCard({ q, small, deck, d, reload, now, inbox, open }) {
   const mine = d.mine[q.id];
+  const [vis, setVis] = useState(() => startingVisibility(q, d));
   const [split, setSplit] = useState(null);
   const [friendAns, setFriendAns] = useState([]);
   const [error, setError] = useState('');
@@ -335,21 +363,22 @@ function QuestionCard({ q, small, d, reload, now, inbox }) {
       : [[true, null, 'Yeah'], [false, null, 'Nah']];
     body = (
       <>
-        <div className="answer-row">
+        <VisibilityPicker d={d} value={vis} onChange={setVis} label="Who sees your answer" />
+        <div className={`answer-row${deck ? ' halves' : ''}`}>
           {opts.map(([v, emoji, label]) => (
             <button key={label} className={`big ${q.option_yes ? 'pick' : v ? 'yes' : 'no'}`}
-              onClick={() => act('answer', { p_question: q.id, p_value: v })}>
+              onClick={() => act('answer', { p_question: q.id, p_value: v, p_visibility: vis })}>
               {emoji && <span className="e" aria-hidden="true">{emoji}</span>}{label}
             </button>
           ))}
         </div>
-        <p className="hint">You see how everyone answered after you vote.</p>
+        <p className="hint">{deck ? 'Tap left or right. ' : ''}You see how everyone answered after you vote.</p>
       </>
     );
   } else {
     const pct = split && split.total ? Math.round((100 * split.yes) / split.total) : 0;
     const hidden = mine.hidden_until && new Date(mine.hidden_until) > now;
-    const canSend = q.sensitivity !== 'sensitive' && d.friends.length > 0;
+    const canSend = !deck && q.sensitivity !== 'sensitive' && d.friends.length > 0;
     body = (
       <>
         <div className="inline">
@@ -370,15 +399,15 @@ function QuestionCard({ q, small, d, reload, now, inbox }) {
         )}
         {q.daily_date === todayUK() && split && pct < 50 && mine.value && split.total > 1 &&
           <div className="hook">You're one of the {pct}% who said yeah.</div>}
-        <span className="label">Who sees this answer on your profile</span>
-        <div className="seg" role="group" aria-label="Visibility">
-          {['public', 'friends', 'private'].filter(v => d.me.is_adult || v !== 'public').map(v => (
-            <button key={v} aria-pressed={mine.visibility === v}
-              onClick={() => act('set_visibility', { p_question: q.id, p_visibility: v })}>{v[0].toUpperCase() + v.slice(1)}</button>
-          ))}
-        </div>
         {hidden && <p className="hint">You changed your mind, so this stays hidden from others until {new Date(mine.hidden_until).toLocaleDateString('en-GB')}.</p>}
-        {!mine.verified && (d.me.changes_left_today > 0
+        {deck ? (
+          <p className="hint">Seen by: {mine.visibility === 'public' ? 'everyone' : mine.visibility === 'friends' ? 'your friends' : 'only you'}.{' '}
+            <button className="linkbtn" onClick={() => open(q.id)}>Change it, or send to a friend</button></p>
+        ) : (
+          <VisibilityPicker d={d} value={mine.visibility} label="Who sees this answer on your profile"
+            onChange={v => act('set_visibility', { p_question: q.id, p_visibility: v })} />
+        )}
+        {!deck && !mine.verified && (d.me.changes_left_today > 0
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
               Change my answer to {word(q, !mine.value).toLowerCase()} (1 a day)</button>
           : <p className="hint">You've used today's change of mind.</p>)}
@@ -403,7 +432,7 @@ function QuestionCard({ q, small, d, reload, now, inbox }) {
   }
 
   return (
-    <div className={`card${small ? ' small' : ''}`}>
+    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}`}>
       <Chips q={q}>{challenge && <span className="chip timer">⏱ {left(challenge.expires_at, now)}</span>}</Chips>
       <h2 className="qtext">{q.text}</h2>
       {challenge && !mine && <p className="hint">Sent by {d.person[challenge.from_user]?.display_name}. Answer before the timer runs out for 2 slashes. Doesn't count towards your daily answers.</p>}
@@ -428,31 +457,93 @@ function Row({ q, d, open, extra }) {
 // Tabs
 // ---------------------------------------------------------------------------
 
+// Unanswered questions, mixed so the same theme doesn't come up twice in a row.
+function interleave(qs) {
+  const byCat = {};
+  qs.forEach(q => (byCat[q.category] || (byCat[q.category] = [])).push(q));
+  const lists = Object.values(byCat), out = [];
+  for (let i = 0; out.length < qs.length; i++) lists.forEach(l => l[i] && out.push(l[i]));
+  return out;
+}
+
 function Today(ctx) {
-  const { d, inbox, now } = ctx;
-  const daily = d.questions.find(q => q.daily_date === todayUK());
-  const next = d.questions.filter(q => !q.is_event && !q.daily_date && !d.mine[q.id] && q.sensitivity !== 'sensitive').slice(0, 4);
+  const { d, inbox } = ctx;
+  const today = todayUK();
+  const daily = d.questions.find(q => q.daily_date === today);
+  // The deck is fixed when the tab opens: today's question first, then questions
+  // friends sent you, then everything else you haven't answered.
+  const [ids] = useState(() => {
+    const sent = inbox.map(c => c.question_id).filter(id => !d.mine[id]);
+    const rest = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
+      && (!q.daily_date || q.daily_date < today) && !sent.includes(q.id)
+      && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
+    return [...new Set([daily?.id, ...sent, ...rest.map(q => q.id)].filter(Boolean))];
+  });
+  const [i, setI] = useState(0);
+  const [drag, setDrag] = useState(null);
+  const [leaving, setLeaving] = useState(0);
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
+
+  const q = d.byId[ids[i]];
+  const answered = q && d.mine[q.id];
+  const sentIds = new Set(inbox.map(c => c.question_id));
+  const outOfAnswers = q && !answered && q.id !== daily?.id && !sentIds.has(q.id) && d.me.other_answers_left_today <= 0;
+
+  function next(dir) {
+    if (leaving) return;
+    setLeaving(dir);
+    setTimeout(() => { setLeaving(0); setDrag(null); setI(x => x + 1); }, 230);
+  }
+  // Swipe either way: before answering it skips, after answering it moves on.
+  const swipe = {
+    onPointerDown: e => { if (!leaving && e.button === 0) setDrag({ x0: e.clientX, dx: 0, on: false }); },
+    onPointerMove: e => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x0;
+      if (!drag.on && Math.abs(dx) > 10) { e.currentTarget.setPointerCapture(e.pointerId); }
+      setDrag({ ...drag, dx, on: drag.on || Math.abs(dx) > 10 });
+    },
+    onPointerUp: () => { if (drag && drag.on && Math.abs(drag.dx) > 80) next(Math.sign(drag.dx)); else setDrag(null); },
+    onPointerCancel: () => setDrag(null),
+  };
+  const style = leaving
+    ? { transform: `translateX(${leaving * 130}%) rotate(${leaving * 14}deg)`, transition: 'transform .23s ease-in' }
+    : drag && drag.on
+      ? { transform: `translateX(${drag.dx}px) rotate(${drag.dx / 22}deg)` }
+      : { transition: 'transform .18s ease-out' };
+  const behind = ids.slice(i + 1, i + 3);
+
   return (
     <>
-      <div className="head"><span className="eyebrow">{date} · Today's question</span></div>
-      {daily ? <QuestionCard q={daily} {...ctx} /> : <p className="empty">No question today yet.</p>}
-      {inbox.length > 0 && (
-        <div className="section"><h2>Sent to you</h2>
-          <div className="rows">{inbox.map(c => (
-            <Row key={c.id} q={d.byId[c.question_id]} {...ctx}
-              extra={<span className="chip timer">⏱ {left(c.expires_at, now)} · {d.person[c.from_user]?.display_name}</span>} />
-          ))}</div>
+      <div className="head">
+        <span className="eyebrow">{date} · {q && q.id === daily?.id ? "Today's question" : q ? `${ids.length - i - 1} more after this` : 'All done'}</span>
+      </div>
+      {!q || outOfAnswers ? (
+        <div className="card deck-end">
+          <h2 className="qtext">{q ? 'That\'s your answers for today' : 'You\'ve seen them all'}</h2>
+          <p className="hint">{q
+            ? 'Come back tomorrow for a new daily question. Questions friends send you still count.'
+            : 'New questions arrive every day. Suggest one in the Questions tab.'}</p>
+        </div>
+      ) : (
+        <div className="deck">
+          {behind.map((id, k) => <div key={id} className={`card behind b${k + 1}`} aria-hidden="true" />).reverse()}
+          <div className="top" style={style} {...swipe}>
+            <QuestionCard key={q.id} q={q} deck {...ctx} />
+          </div>
         </div>
       )}
-      <div className="section"><h2>Keep going</h2>
-        <p className="hint">
-          {d.me.other_answers_left_today > 0
-            ? `${d.me.other_answers_left_today} more answer${d.me.other_answers_left_today === 1 ? '' : 's'} today, with one always kept for the daily question.`
-            : 'That\'s your answers for today. Questions friends send you still count.'}
-        </p>
-        <div className="rows">{next.map(q => <Row key={q.id} q={q} {...ctx} />)}</div>
-      </div>
+      {q && !outOfAnswers && (
+        <div className="deck-nav">
+          <span className="hint">{answered ? 'Swipe for the next question' : 'Swipe to skip'}</span>
+          <button className="ghost" onClick={() => next(-1)}>{answered ? 'Next →' : 'Skip →'}</button>
+        </div>
+      )}
+      <p className="hint" style={{ marginTop: 10 }}>
+        {d.me.other_answers_left_today > 0
+          ? `${d.me.other_answers_left_today} more answer${d.me.other_answers_left_today === 1 ? '' : 's'} today, with one always kept for the daily question.`
+          : 'That\'s your answers for today. Questions friends send you still count.'}
+      </p>
     </>
   );
 }

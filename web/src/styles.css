@@ -168,3 +168,15 @@ details summary { cursor: pointer; margin: 6px 0; font-family: var(--display); }
 button.chip { cursor: pointer; }
 button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .hint a { color: inherit; font-weight: 600; text-underline-offset: 3px; }
+
+/* Today: a stack of question cards. Tap left or right to answer, swipe to move on. */
+.deck { display: grid; margin: 0 12px 12px 0; }
+.deck > * { grid-area: 1 / 1; }
+.deck .behind { box-shadow: none; }
+.deck .behind.b1 { transform: translate(6px, 6px); }
+.deck .behind.b2 { transform: translate(12px, 12px); }
+.deck .top { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.deck .top .card { height: 100%; }
+.answer-row.halves .big { min-height: clamp(120px, 26vh, 220px); }
+.deck-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
+.deck-end { text-align: left; }
