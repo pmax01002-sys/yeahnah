@@ -6,36 +6,43 @@
 <title>Your data on yeah/nah</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Figtree:wght@400;600;700&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Pixelify+Sans:wght@400;600;700&display=swap" />
 <style>
+  /* Same retro look as the app: a 1-bit window on a pink desk. Paper is the default; Phosphor only with data-theme="phosphor". */
   :root {
-    --bg: #E9EBF1; --frame: #F7F8FB; --surface: #FFFFFF; --ink: #151829; --muted: #62677F; --line: #DCDFE8;
-    --yes: #10875F; --no: #C93C35;
-    --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
-    --body: "Figtree", "Segoe UI", system-ui, sans-serif;
+    --desk: #FF6EC7; --dot: #D93A95; --surface: #FBFBF8; --ink: #141414; --hi: #141414; --hi-ink: #FBFBF8;
+    --yes: #1D7A45; --no: #C8352B;
+    --stripes: repeating-linear-gradient(var(--surface) 0 3px, var(--ink) 3px 4px);
+    --display: "Pixelify Sans", "Chicago", "Geneva", ui-monospace, monospace;
+    --body: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23C8352B' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");
     color-scheme: light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #080A14; --frame: #11131F; --surface: #1A1D2D; --ink: #ECEDF5; --muted: #9A9EB6; --line: #2B2F44;
-            --yes: #35C493; --no: #F2716A; color-scheme: dark; }
-  }
+  :root[data-theme="phosphor"] { --desk: #13060E; --dot: #4D1736; --surface: #0C120D; --ink: #9FF58A; --hi: #9FF58A; --hi-ink: #0C120D;
+            --yes: #9FF58A; --no: #FFB35C; --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%239FF58A' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%239FF58A' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FFB35C' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E"); color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
-  main { max-width: 440px; margin: 0 auto; background: var(--frame); min-height: 100vh; padding: 20px 16px 40px; }
-  @media (min-width: 480px) { main { margin: 16px auto; min-height: 0; border: 1px solid var(--line); border-radius: 28px; padding: 24px 22px 36px; } }
+  body { margin: 0; color: var(--ink); font: 14px/1.6 var(--body); -webkit-font-smoothing: none;
+         background: radial-gradient(circle at 1px 1px, var(--dot) 0.9px, transparent 1.1px) 0 0 / 4px 4px, var(--desk); }
+  main { max-width: 440px; margin: 0 auto; background: var(--surface); min-height: 100vh; padding: 0 16px 40px; }
+  @media (min-width: 480px) { main { margin: 20px auto; min-height: 0; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 0 22px 36px; } }
+  :focus-visible { outline: 2px dashed var(--ink); outline-offset: 2px; }
   a { color: inherit; text-underline-offset: 3px; }
-  .back { font-weight: 600; font-size: 14px; color: var(--muted); }
-  .brand { font-family: var(--display); font-weight: 800; color: var(--muted); }
-  .brand span { color: var(--yes); } .brand em { font-style: normal; color: var(--no); }
-  h1 { font-family: var(--display); font-weight: 800; font-size: 30px; line-height: 1.05; letter-spacing: -.025em; margin: 18px 0 6px; }
-  h2 { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: -.015em; margin: 28px 0 8px; }
+  .back { display: flex; align-items: center; gap: 10px; margin: 0 -22px; padding: 6px 12px; border-bottom: 2px solid var(--ink);
+          background: var(--surface); font-family: var(--display); font-size: 14px; text-decoration: none; white-space: nowrap; }
+  .back::before, .back::after { content: ""; flex: 1; height: 12px; background: var(--stripes); }
+  .back:hover { text-decoration: underline; }
+  @media (max-width: 479px) { .back { margin: 0 -16px; } }
+  .brand { display: inline-block; width: 40px; height: 14px; overflow: hidden; white-space: nowrap; text-indent: 120%; background: var(--logo) center / 40px 14px no-repeat; }
+  .brand span, .brand em { color: transparent; font-style: normal; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: 32px; line-height: 1; text-transform: uppercase; margin: 22px 0 6px; text-wrap: balance; }
+  h2 { font-family: var(--display); font-weight: 600; font-size: 20px; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--ink); }
   p, ul { margin: 0 0 10px; }
-  ul { padding-left: 20px; }
+  ul { padding-left: 20px; list-style: square; }
   li { margin-bottom: 6px; }
-  .muted { color: var(--muted); font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; margin: 4px 0 12px; }
-  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-top: 1px solid var(--line); }
-  thead th { border-top: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .muted { font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 2px solid var(--ink); font-size: 13px; margin: 4px 0 12px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-top: 1px solid var(--ink); }
+  thead th { border-top: 0; background: var(--hi); color: var(--hi-ink); font-family: var(--display); font-size: 12px; font-weight: 600; }
   tbody th { font-weight: 600; width: 40%; }
 </style>
 </head>
@@ -52,7 +59,7 @@
     <li>Your email address and password. The password is stored scrambled, so nobody can read it.</li>
     <li>Your handle, the name people see and your date of birth.</li>
     <li>Your answers, including earlier answers you changed, and who you chose to show each one to.</li>
-    <li>Who you follow, the groups you're in, questions you send to or get from friends, your guesses and your slashes (free play points).</li>
+    <li>Who you follow, the groups you're in, questions you send to or get from friends, your guesses and your slashes.</li>
     <li>Questions you suggest, reports you make and feedback you send.</li>
     <li>When you signed up, and when you turned sensitive questions on or off.</li>
     <li>Standard technical logs kept by the services that run the app, such as IP addresses and sign-in times, used to keep it secure.</li>
@@ -83,7 +90,7 @@
 
   <h2>Who we share it with</h2>
   <p>Nobody, apart from the two services that run the app for us: <a href="https://supabase.com/privacy">Supabase</a> (database and sign-in) and <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a> (delivers the app to your device). They handle it on our behalf under their data processing terms.</p>
-  <p>We don't sell your answers, and no brand gets any data during this test. If we ever offer brands results, they will only be totals for groups of 100 or more people, never sensitive answers, and we'll update this page and tell you before it starts.</p>
+  <p>Your answers stay inside yeah/nah: we don't pass them to anyone else. If that ever changes, we'll update this page and tell you before it does.</p>
 
   <h2>Getting a copy, or deleting it</h2>
   <ul>
@@ -93,8 +100,6 @@
   </ul>
   <p>If you're unhappy with how we handle your data, you can complain to the Information Commissioner's Office at <a href="https://ico.org.uk/make-a-complaint/">ico.org.uk</a>.</p>
 
-  <h2>Age</h2>
-  <p>yeah/nah is for people aged 18 and over. If you think someone younger has signed up, tell us through Feedback.</p>
 </main>
 </body>
 </html>

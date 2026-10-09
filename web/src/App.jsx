@@ -131,6 +131,7 @@ function SignIn() {
   return (
     <div className="app"><form className="screen center" onSubmit={submit}>
       <div className="big-brand"><span>yeah</span>/<em>nah</em></div>
+      <p className="slogan">Believe it? Call it!</p>
       <p className="hint">One yes/no question a day. Your answers build your profile.</p>
       <InviteBanner />
       <div className="seg" role="group" aria-label="Sign in or sign up">
@@ -144,7 +145,7 @@ function SignIn() {
           value={password} onChange={e => setPassword(e.target.value)} /></label>
       <Msg error={error} note={note} />
       <button className="solid" disabled={busy}>{mode === 'signin' ? 'Sign in' : 'Create account'}</button>
-      <p className="hint">Demo build. Slashes are free play points with no money value. <PrivacyLink>How we handle your data</PrivacyLink></p>
+      <p className="hint">A test version for friends. <PrivacyLink>How we handle your data</PrivacyLink></p>
     </form></div>
   );
 }
@@ -176,7 +177,7 @@ function CreateProfile({ onDone }) {
         <input required maxLength={40} value={f.name} onChange={set('name')} /></label>
       <label className="field"><span className="label">Date of birth</span>
         <input type="date" required value={f.birth} onChange={set('birth')} /></label>
-      <p className="hint">yeah/nah is 18+ for now. Your date of birth is never shown to anyone. <PrivacyLink>Privacy notice</PrivacyLink></p>
+      <p className="hint">Your date of birth is never shown to anyone. <PrivacyLink>Privacy notice</PrivacyLink></p>
       <Msg error={error} />
       <button className="solid">Start answering</button>
     </form></div>
@@ -260,7 +261,7 @@ function Signed() {
         <div className="brand"><span>yeah</span>/<em>nah</em></div>
         <div className="pills">
           <span className="pill" title="Answers left today">{d.me.answers_left_today} left</span>
-          <span className="pill credits" title="Free play points">{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
+          <span className="pill credits" title="Slashes: spend 3 to send a friend a question">{d.me.credits} {d.me.credits === 1 ? 'slash' : 'slashes'}</span>
           <button className="pill feedback" onClick={() => setFeedback(true)}>Feedback</button>
         </div>
       </header>
@@ -324,7 +325,7 @@ function QuestionCard({ q, small, d, reload, now, inbox }) {
     body = (
       <div className="lock">
         <strong>Sensitive question</strong>
-        <p className="hint">Reveals religious or political views. Needs your opt-in, starts private and is never used for brands.</p>
+        <p className="hint">Reveals religious or political views. Needs your opt-in and starts private.</p>
         <button className="solid" onClick={() => act('set_sensitive_opt_in', { p_on: true })}>Turn on sensitive questions</button>
       </div>
     );
@@ -566,7 +567,7 @@ function Predict({ d, reload }) {
         <div className="stat"><b>{hr.correct}/{hr.resolved}</b><span>right</span></div>
         <div className="stat"><b>{hr.made}</b><span>guesses</span></div>
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>Guesses are free. Your hit rate shows on your profile.</p>
+      <p className="hint" style={{ marginTop: 8 }}>Guessing doesn't use slashes. Your hit rate shows on your profile.</p>
       <Msg error={error} />
 
       {daily && (
@@ -740,7 +741,7 @@ function Profile({ d, reload }) {
     <>
       <div className="head" style={{ display: 'block' }}>
         <h1>{d.me.display_name}</h1>
-        <span className="hint">@{d.me.handle} · {d.me.is_adult ? '18+' : 'Under 18: friends-only profile'}</span>
+        <span className="hint">@{d.me.handle}{d.me.is_adult ? '' : ' · Friends-only profile'}</span>
       </div>
       <div className="stats">
         <div className="stat"><b>{facts.length}</b><span>answers</span></div>
@@ -769,14 +770,14 @@ function Profile({ d, reload }) {
             <button className="switch" role="switch" aria-checked={d.me.sensitive_opt_in} aria-label="Sensitive questions"
               onClick={() => act('set_sensitive_opt_in', { p_on: !d.me.sensitive_opt_in })} /></div>
             <p className="hint">{d.me.sensitive_opt_in
-              ? 'On. These answers start private and never count towards brand data. Turning this off makes them all private.'
+              ? 'On. These answers start private. Turning this off makes them all private.'
               : 'Off. We record when you agree so you can withdraw at any time.'}</p></div>
         </div>
       )}
 
       <div className="section"><h2>Your data</h2>
         <div className="panel">
-          <p className="hint">We never sell your answers. Brands only ever see totals for groups of 100+ people. <PrivacyLink>Privacy notice</PrivacyLink></p>
+          <p className="hint"><PrivacyLink>How we handle your data</PrivacyLink></p>
           <button className="ghost" onClick={download}>Download my data</button>
           <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
           <button className="ghost danger" onClick={del}>Delete my account</button>
@@ -834,7 +835,7 @@ function Groups({ d, reload, open }) {
       <div className="section"><h2>Your group</h2>
         <p className="hint">{d.me.is_adult
           ? 'Make a group and share the invite link. Everyone who joins sees how each other answered every question, once they have answered it too.'
-          : 'Groups are for over-18s in this test version.'}</p>
+          : 'Groups aren\'t available on your account yet.'}</p>
         {makeForm}
         <Msg error={error} note={note} />
       </div>
