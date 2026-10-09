@@ -375,7 +375,6 @@ test('friend questions: no approval, only friends see them, 3 slashes to make an
   await ok(pal1.from('follows').insert({ follower: await id(pal1), followed: await id(outsider) }));
   const before = await me(writer);
 
-  await fails(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [] }), /at least one friend/);
   await fails(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [outsider.handle] }), /only send questions to friends/);
   const q = await ok(writer.rpc('make_friend_question', { p_text: 'Would you eat a bug for a tenner?', p_value: true, p_handles: [pal1.handle, pal2.handle] }));
   const after1 = await me(writer);
@@ -426,6 +425,47 @@ test('stars: only yours, and only on questions you can see', async () => {
   assert.deepEqual((await ok(a.rpc('export_my_data'))).starred_questions.map(r => r.text), [text]);
   await ok(a.rpc('set_star', { p_question: q, p_on: false }));
   assert.equal((await ok(a.from('stars').select('question_id'))).length, 0);
+});
+
+test('question links: anyone with the link can see and answer, even signed out first', async () => {
+  const id = async c => (await me(c)).id;
+  const [maker, newbie] = [await user('maker', '1990-07-07'), await user('newbie', '1991-07-07')];
+  // A friends-only question made just to share by link: no friends picked.
+  const q = await ok(maker.rpc('make_friend_question', { p_text: 'Would you go to space for a week?', p_value: true, p_handles: [] }));
+  assert.equal((await me(maker)).credits, 7);
+  await fails(newbie.rpc('share_question', { p_question: q }), /questions you wrote/);
+  const code = await ok(maker.rpc('share_question', { p_question: q }));
+  assert.equal(await ok(maker.rpc('share_question', { p_question: q })), code, 'one link per question');
+
+  // Signed out, the link shows the question and who asked.
+  const anon = createClient(URL, ANON, opts);
+  assert.deepEqual(await ok(anon.rpc('question_preview', { p_code: code })), { text: 'Would you go to space for a week?', by: 'maker', live: true });
+  await fails(anon.rpc('open_question_link', { p_code: code }));
+  assert.equal(await ok(anon.rpc('question_preview', { p_code: 'nope' })), null);
+
+  // Not friends, so newbie can't see it until opening the link.
+  assert.equal((await ok(newbie.from('questions').select('id').eq('id', q))).length, 0);
+  const opened = await ok(newbie.rpc('open_question_link', { p_code: code }));
+  assert.equal(opened.id, q);
+  assert.equal(opened.by, 'maker');
+  assert.equal(opened.friends, false);
+  assert.equal((await ok(newbie.from('questions').select('id').eq('id', q))).length, 1);
+  const left = (await me(newbie)).other_answers_left_today;
+  await ok(newbie.rpc('answer', { p_question: q, p_value: false, p_visibility: 'public' }));
+  assert.equal((await me(newbie)).other_answers_left_today, left, "outside the daily five");
+  assert.deepEqual(await ok(newbie.rpc('question_split', { p_question: q })), { yes: 1, no: 1, total: 2 });
+  // Following the writer from the link sends them a friend request.
+  await ok(newbie.from('follows').insert({ follower: await id(newbie), followed: opened.by_id }));
+  assert.equal((await ok(newbie.rpc('open_question_link', { p_code: code }))).following, true);
+  assert.equal((await ok(newbie.rpc('export_my_data'))).questions_opened_from_links.length, 1);
+
+  // A public question's link only works once a moderator approves it.
+  const pq = await ok(maker.rpc('submit_question', { p_text: 'Should the clocks stop changing?' }));
+  const pcode = await ok(maker.rpc('share_question', { p_question: pq }));
+  assert.equal((await ok(anon.rpc('question_preview', { p_code: pcode }))).live, false);
+  await fails(newbie.rpc('open_question_link', { p_code: pcode }), /waiting for a moderator/);
+  await ok(admin.from('questions').update({ status: 'approved' }).eq('id', pq));
+  assert.equal((await ok(newbie.rpc('open_question_link', { p_code: pcode }))).id, pq);
 });
 
 test('feedback lands in a table only its author (and the owner) can read', async () => {

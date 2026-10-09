@@ -34,6 +34,44 @@ function clearInvite() {
 }
 pendingInvite();
 
+// A question link (?q=CODE) is remembered the same way.
+const QUESTION_KEY = 'yeahnah-q';
+let questionCode = null;
+function pendingQuestion() {
+  const fromUrl = new URLSearchParams(window.location.search).get('q');
+  if (fromUrl) {
+    questionCode = fromUrl;
+    try { localStorage.setItem(QUESTION_KEY, fromUrl); } catch { /* memory copy is enough */ }
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  if (!questionCode) try { questionCode = localStorage.getItem(QUESTION_KEY); } catch { /* none */ }
+  return questionCode;
+}
+function clearQuestion() {
+  questionCode = null;
+  try { localStorage.removeItem(QUESTION_KEY); } catch { /* none */ }
+}
+pendingQuestion();
+
+// The question from a link, shown on the sign-up page.
+function QuestionBanner() {
+  const [q, setQ] = useState(null);
+  useEffect(() => {
+    const code = pendingQuestion();
+    if (code) call('question_preview', { p_code: code }).then(setQ).catch(() => {});
+  }, []);
+  if (!q) return null;
+  return (
+    <div className="card shared-q">
+      <span className="label">{q.by ? `${q.by} asked you` : 'You were asked'}</span>
+      <h2 className="qtext">{q.text}</h2>
+      <p className="hint">{q.live
+        ? 'Sign up to answer it and see how everyone else answered.'
+        : 'It goes live once a moderator approves it, and this link works then.'}</p>
+    </div>
+  );
+}
+
 function InviteBanner() {
   const [g, setG] = useState(null);
   useEffect(() => {
@@ -105,7 +143,7 @@ export default function App() {
 }
 
 function SignIn() {
-  const [mode, setMode] = useState(pendingInvite() ? 'signup' : 'signin');
+  const [mode, setMode] = useState(pendingInvite() || pendingQuestion() ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -128,6 +166,7 @@ function SignIn() {
       <p className="slogan">Believe it? Call it!</p>
       <p className="hint">One yes/no question a day. Your answers build your profile.</p>
       <InviteBanner />
+      <QuestionBanner />
       <div className="seg" role="group" aria-label="Sign in or sign up">
         <button type="button" aria-pressed={mode === 'signin'} onClick={() => setMode('signin')}>Sign in</button>
         <button type="button" aria-pressed={mode === 'signup'} onClick={() => setMode('signup')}>New here</button>
@@ -242,6 +281,17 @@ function Signed() {
   }, [meId]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 7000); return () => clearTimeout(t); } }, [toast]);
 
+  // Open the question from a link once the profile exists.
+  const [shared, setShared] = useState(null);
+  useEffect(() => {
+    const code = meId && pendingQuestion();
+    if (!code) return;
+    clearQuestion();
+    call('open_question_link', { p_code: code })
+      .then(async r => { await reload(); setShared(r); setSheet(r.id); })
+      .catch(e => setToast(e.message));
+  }, [meId]);
+
   if (!d) return <div className="app" />;
   if (!d.me) return <CreateProfile onDone={reload} />;
 
@@ -276,14 +326,62 @@ function Signed() {
         ))}
       </nav>
       {feedback && <FeedbackSheet tab={tab} onClose={() => setFeedback(false)} />}
-      {sheet && (
+      {sheet && d.byId[sheet] && (
         <div className="scrim" onClick={e => e.target === e.currentTarget && setSheet(null)}>
           <div className="sheet" role="dialog" aria-modal="true">
             <div className="sheet-top"><button className="close" onClick={() => setSheet(null)}>Close</button></div>
+            {shared && shared.id === sheet && <SharedBy shared={shared} setShared={setShared} d={d} />}
             <QuestionCard q={d.byId[sheet]} small {...ctx} />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Above a question opened from a link: who asked, and a friend request if you aren't friends yet.
+function SharedBy({ shared, setShared, d }) {
+  const [error, setError] = useState('');
+  if (!shared.by || shared.by_id === d.me.id) return null;
+  async function follow() {
+    const { error: e } = await supabase.from('follows').insert({ follower: d.me.id, followed: shared.by_id });
+    if (e) setError(e.message); else setShared({ ...shared, following: true });
+  }
+  return (
+    <div className="hook shared-by">
+      {shared.by} shared this with you.{' '}
+      {shared.friends ? null : shared.following
+        ? `Friend request sent. You'll be friends once ${shared.by} adds you back.`
+        : <button className="linkbtn" onClick={follow}>Add {shared.by} as a friend</button>}
+      <Msg error={error} />
+    </div>
+  );
+}
+
+// A link to a question you wrote. Anyone who opens it can answer, signing up first if they need to.
+function ShareLink({ q }) {
+  const [url, setUrl] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  async function share() {
+    setError(''); setNote('');
+    try {
+      const link = url || `${window.location.origin}/?q=${await call('share_question', { p_question: q.id })}`;
+      setUrl(link);
+      if (navigator.share) {
+        try { await navigator.share({ title: 'yeah/nah', text: q.text, url: link }); return; }
+        catch (e) { if (e.name === 'AbortError') return; }
+      }
+      try { await navigator.clipboard.writeText(link); setNote('Link copied. Paste it anywhere.'); }
+      catch { setNote('Copy the link above.'); }
+    } catch (e) { setError(e.message); }
+  }
+  return (
+    <div className="share">
+      <button type="button" className="ghost" onClick={share}><Px name="send" /> Share as a link</button>
+      {url && <input readOnly value={url} onFocus={e => e.target.select()} aria-label="Link to this question" />}
+      {q.status === 'pending' && <p className="hint">The link works once a moderator approves the question.</p>}
+      <Msg error={error} note={note} />
     </div>
   );
 }
@@ -412,6 +510,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
               Change my answer to {word(q, !mine.value).toLowerCase()} (1 a day)</button>
           : <p className="hint">You've used today's change of mind.</p>)}
+        {q.created_by === d.me.id && <ShareLink q={q} />}
         {canSend && (sending
           ? <SendPanel q={q} d={d} reload={reload} friendAns={friendAns} onClose={() => setSending(false)} />
           : <button className="ghost send-btn" onClick={() => setSending(true)}><Px name="send" /> Send to friends or a group</button>)}
@@ -425,7 +524,8 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
         {starrable(q) && (deck ? d.stars.has(q.id) : !mine || d.stars.has(q.id)) && <StarToggle q={q} d={d} reload={reload} chip />}
         {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
-          : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question' : `By ${d.person[q.created_by]?.display_name || 'a friend'}`}</span>}
+          : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question'
+            : d.person[q.created_by] ? `By ${d.person[q.created_by].display_name}` : 'Shared with you'}</span>}
         {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {left(challenge.expires_at, now)}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
@@ -817,17 +917,18 @@ function MakeQuestion({ d, reload, themes }) {
   const cost = forFriends ? fq : pub;
   const open = text.length > 0;
   const waiting = d.questions.filter(q => q.created_by === d.me.id && q.status === 'pending');
-  const ready = text.trim().length >= 5 && (!forFriends || (value !== null && picked.length > 0));
+  const ready = text.trim().length >= 5 && (!forFriends || value !== null);
+  const [made, setMade] = useState(null);
   const nameOf = h => d.friends.find(f => f && f.handle === h)?.display_name || h;
 
   async function submit(e) {
     e.preventDefault(); setError(''); setNote(''); setBusy(true);
     try {
       if (forFriends) {
-        await call('make_friend_question', { p_text: text, p_value: value, p_handles: picked, p_minutes: timer });
-        setNote(`Sent to ${picked.map(nameOf).join(', ')}. Your friends can find it under Friends too.`);
+        setMade(await call('make_friend_question', { p_text: text, p_value: value, p_handles: picked, p_minutes: timer }));
+        setNote(`${picked.length ? `Sent to ${picked.map(nameOf).join(', ')}. ` : 'Made. '}Share the link so anyone can answer it.`);
       } else {
-        await call('submit_question', { p_text: text, p_category: theme || 'General' });
+        setMade(await call('submit_question', { p_text: text, p_category: theme || 'General' }));
         setNote('Thanks. A moderator checks it before it goes live for everyone.');
       }
       setText(''); setValue(null); setPicked([]);
@@ -843,10 +944,10 @@ function MakeQuestion({ d, reload, themes }) {
         <button type="button" aria-pressed={forFriends} onClick={() => setKind('friends')}>For friends</button>
         <button type="button" aria-pressed={!forFriends} onClick={() => setKind('public')}>For everyone</button>
       </div>
-      <input required minLength={5} maxLength={140} aria-label="Your question" value={text} onChange={e => setText(e.target.value)}
+      <input required minLength={5} maxLength={140} aria-label="Your question" value={text} onChange={e => { setText(e.target.value); setMade(null); }}
         placeholder={forFriends ? 'Would you eat a bug for a tenner?' : 'Is cereal a soup?'} />
       <p className="hint">{forFriends
-        ? `Only your friends can see it, so there's no approval. ${fq} slashes, however many friends you send it to, and passing it on is free.`
+        ? `Only your friends and people you share the link with can see it, so there's no approval. ${fq} slashes, however many friends you send it to, and passing it on is free.`
         : `A moderator checks it before it goes live for everyone. ${pub} slashes, up to 3 a day.`}</p>
       {!open ? null : forFriends ? (d.friends.length === 0
         ? <p className="hint">Add friends in the Group tab first.</p>
@@ -857,7 +958,7 @@ function MakeQuestion({ d, reload, themes }) {
               <button type="button" aria-pressed={value === true} onClick={() => setValue(true)}>Yeah</button>
               <button type="button" aria-pressed={value === false} onClick={() => setValue(false)}>Nah</button>
             </div>
-            <span className="label">Send it to</span>
+            <span className="label">Send it to (optional: you can share a link instead)</span>
             <FriendPicker d={d} picked={picked} setPicked={setPicked} />
             <div className="seg" role="group" aria-label="Timer">
               {TIMERS.map(([m, l]) => <button type="button" key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
@@ -870,10 +971,11 @@ function MakeQuestion({ d, reload, themes }) {
         </select>
       )}
       {open && <button className="solid" disabled={!ready || busy || cost > d.me.credits}>
-        {busy ? 'Sending…' : forFriends ? `Make and send · ${cost} slashes` : `Send for review · ${cost} slashes`}
+        {busy ? 'Sending…' : forFriends ? `${picked.length ? 'Make and send' : 'Make it'} · ${cost} slashes` : `Send for review · ${cost} slashes`}
       </button>}
       {open && cost > d.me.credits && <p className="hint">You have {d.me.credits} slashes. Answering a friend's question in time earns {d.cfg.challenge_reward ?? 2}.</p>}
       <Msg error={error} note={note} />
+      {made && d.byId[made] && <ShareLink q={d.byId[made]} />}
       {waiting.length > 0 && <p className="hint">Waiting for a moderator: {waiting.map(q => `"${q.text}"`).join(', ')}</p>}
     </form>
   );

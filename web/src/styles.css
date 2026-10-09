@@ -178,7 +178,7 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .hint a { color: inherit; font-weight: 600; text-underline-offset: 3px; }
 
 /* Today: a hand of question cards. Tap left or right to answer, swipe left for the next card, right to go back. */
-.deck { display: grid; margin: 0 20px 24px 0; }
+.deck { display: grid; margin: 0 20px 24px 0; isolation: isolate; }  /* keeps the cards' z-index under sheets */
 .deck > * { grid-area: 1 / 1; }
 /* Every card in the hand is in the stack; deckMotion.js places and moves them. */
 .deck .slot { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; transform-origin: 50% 60%; }
@@ -208,6 +208,11 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .make > input, .make > select { border: var(--b) solid var(--ink); background: var(--surface); border-radius: 0; padding: 8px 10px; width: 100%; }
 .make > .solid { align-self: flex-start; }
 .section.make { margin: 0 0 18px; }
+.share { display: flex; flex-direction: column; gap: 8px; }
+.share .ghost { align-self: flex-start; padding: 6px 12px; font-size: 14px; }
+.share input { border: var(--b) solid var(--ink); background: var(--surface); border-radius: 0; padding: 6px 8px; width: 100%; font-size: 12.5px; }
+.shared-q { text-align: left; }
+.shared-by .linkbtn { font-size: inherit; color: inherit; }
 button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
 .chip.group { border-style: dashed; }
 

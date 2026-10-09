@@ -6,7 +6,7 @@ prototype's rules enforced on the server. It runs on free tiers.
 ```
 web/       the app people use (React, built to a static site)
 supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     23 end-to-end checks of the rules, run through the same API the app uses
+tests/     24 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
@@ -23,7 +23,7 @@ tests/     23 end-to-end checks of the rules, run through the same API the app u
 - **Avatars**: each person's pick is saved with `set_avatar('cap-red')` and shown to anyone who can see their name. The picker comes with the retro restyle.
 - **Feedback** button on every screen. Messages land in the `feedback` table.
 - **Predict** (free): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile.
-- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. For everyone, it waits for a moderator and costs 5 slashes.
+- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. Any question you write can also be shared as a link: people without an account see it on the sign-up page, and once in they can answer it and send you a friend request. For everyone, it waits for a moderator and costs 5 slashes.
 - **Download my data** (everything held about you, as a file) and **delete my account** (UK GDPR).
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
@@ -46,7 +46,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
