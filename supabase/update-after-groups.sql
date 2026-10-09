@@ -2,8 +2,9 @@
 -- For a database set up before 2026-10-10. It is the 18+ and themed questions
 -- update, the privacy fixes, the complete data download, avatars, slashes,
 -- question costs with friend questions, stars, question links, the Future
--- unlock, power-up and effect cards and unlimited slashes for the owner
--- (supabase/migrations/20261010* to 20261023*).
+-- unlock, power-up and effect cards, unlimited slashes for the owner and
+-- friend requests from question links
+-- (supabase/migrations/20261010* to 20261024*).
 -- Safe to run more than once, so it doesn't matter if you ran part of it already.
 
 -- Adults only for now, and 79 themed questions in 11 themes.
@@ -1915,5 +1916,38 @@ revoke execute on function public.pocket_use(uuid, text, bigint), public.power_u
   public.power_bonus(uuid), public.settle_called_it(uuid, bigint) from public, anon, authenticated;
 revoke execute on function public.use_power(text, bigint, int, text) from public, anon;
 grant execute on function public.use_power(text, bigint, int, text) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Opening someone's question link sends them a friend request: the person
+-- who shared it sees you under "Want to be friends" with Follow back. It only
+-- happens the first time you open that link, so if you undo it, opening the
+-- link again doesn't send it again.
+--
+-- Safe to run twice.
+
+create or replace function public.open_question_link(p_code text) returns json
+language plpgsql security definer set search_path = '' as $$
+declare uid uuid := public.require_profile(); q public.questions; first_open boolean := false; requested boolean := false;
+begin
+  select qq.* into q from public.question_links l join public.questions qq on qq.id = l.question_id
+   where l.code = trim(p_code);
+  if not found or q.status = 'rejected' then raise exception 'That question link doesn''t work any more'; end if;
+  if q.status <> 'approved' then raise exception 'That question is still waiting for a moderator'; end if;
+  if q.created_by is distinct from uid then
+    -- Every open is recorded; it only lets you see the question when it was written for friends.
+    insert into public.question_link_opens (user_id, question_id) values (uid, q.id) on conflict do nothing;
+    first_open := found;
+    if first_open and q.created_by is not null then
+      insert into public.follows (follower, followed) values (uid, q.created_by) on conflict do nothing;
+      requested := found;
+    end if;
+  end if;
+  return json_build_object('id', q.id, 'by_id', q.created_by,
+    'by', (select display_name from public.profiles where id = q.created_by),
+    'friends', q.created_by = uid or public.are_friends(uid, q.created_by),
+    'following', exists (select 1 from public.follows where follower = uid and followed = q.created_by),
+    'requested', requested);
+end $$;
 
 notify pgrst, 'reload schema';

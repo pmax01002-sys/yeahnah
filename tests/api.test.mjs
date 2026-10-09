@@ -459,14 +459,19 @@ test('question links: anyone with the link can see and answer, even signed out f
   assert.equal(opened.id, q);
   assert.equal(opened.by, 'maker');
   assert.equal(opened.friends, false);
+  // Opening the link sends the writer a friend request, once.
+  assert.equal(opened.requested, true);
+  assert.equal(opened.following, true);
   assert.equal((await ok(newbie.from('questions').select('id').eq('id', q))).length, 1);
   const left = (await me(newbie)).other_answers_left_today;
   await ok(newbie.rpc('answer', { p_question: q, p_value: false, p_visibility: 'public' }));
   assert.equal((await me(newbie)).other_answers_left_today, left, "outside the daily five");
   assert.deepEqual(await ok(newbie.rpc('question_split', { p_question: q })), { yes: 1, no: 1, total: 2 });
-  // Following the writer from the link sends them a friend request.
-  await ok(newbie.from('follows').insert({ follower: await id(newbie), followed: opened.by_id }));
-  assert.equal((await ok(newbie.rpc('open_question_link', { p_code: code }))).following, true);
+  // Undoing the request sticks: opening the link again doesn't resend it.
+  await ok(newbie.from('follows').delete().eq('follower', await id(newbie)).eq('followed', opened.by_id));
+  const again = await ok(newbie.rpc('open_question_link', { p_code: code }));
+  assert.equal(again.requested, false);
+  assert.equal(again.following, false);
   assert.equal((await ok(newbie.rpc('export_my_data'))).questions_opened_from_links.length, 1);
 
   // A public question's link only works once a moderator approves it.
