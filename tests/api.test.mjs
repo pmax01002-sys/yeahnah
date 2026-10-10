@@ -772,3 +772,26 @@ test('hot ones: the most starred lately, once enough different people are in, an
     await ok(admin.from('app_config').update({ value: was }).eq('key', 'hot_count'));
   }
 });
+
+test('growth dashboard: admins only, totals only', async () => {
+  const g1 = await user('grow', '1990-01-01');
+  const gId = (await me(g1)).id;
+  await fails(g1.rpc('admin_growth', { p_days: 28 }), /Only admins/);
+  await fails(g1.rpc('virality_on', { p_day: '2026-10-10' }));
+  await ok(admin.from('admins').insert({ user_id: gId }));
+  try {
+    const g = await ok(g1.rpc('admin_growth', { p_days: 7 }));
+    assert.equal(g.days, 7);
+    assert.equal(g.daily.length, 7);
+    assert.equal(g.virality_trend.length, 7);
+    assert.ok(g.people >= 1);
+    assert.ok(g.daily.some(d => d.signups >= 1), 'this sign-up is counted');
+    for (const k of ['v', 'v_measured', 'spread', 'growth', 'weekly_active']) assert.ok(k in g.virality, k);
+    // Nothing that could point at a person: no ids or handles anywhere.
+    assert.doesNotMatch(JSON.stringify(g), /[0-9a-f]{8}-[0-9a-f]{4}-/);
+    assert.ok(!JSON.stringify(g).includes(g1.handle));
+    assert.equal((await ok(g1.rpc('admin_growth', { p_days: 1000 }))).days, 90);
+  } finally {
+    await ok(admin.from('admins').delete().eq('user_id', gId));
+  }
+});
