@@ -752,3 +752,23 @@ test('admins set the daily question; an empty day fills itself', async () => {
     await ok(admin.from('admins').delete().eq('user_id', bossId));
   }
 });
+
+test('hot ones: the most starred lately, once enough different people are in, and no counts', async () => {
+  const [h1, h2, h3] = await Promise.all(['hot1', 'hot2', 'hot3'].map(n => user(n, '1990-01-01')));
+  const q = (await ok(admin.from('questions').insert({ text: `Hot check ${run}?`, category: 'General' }).select('id').single())).id;
+  const was = (await ok(admin.from('app_config').select('value').eq('key', 'hot_count').single())).value;
+  await ok(admin.from('app_config').update({ value: 1000 }).eq('key', 'hot_count'));
+  try {
+    await ok(h1.rpc('set_star', { p_question: q, p_on: true }));
+    await ok(h2.rpc('set_star', { p_question: q, p_on: true }));
+    // Two people isn't enough: a small group could tell who starred it.
+    assert.ok(!(await ok(h1.rpc('hot_questions'))).includes(q));
+    await ok(h3.rpc('set_star', { p_question: q, p_on: true }));
+    const hot = await ok(alice.rpc('hot_questions'));
+    assert.ok(hot.includes(q));
+    assert.ok(hot.every(id => typeof id === 'number'), 'only ids come back');
+    await fails(createClient(URL, ANON, opts).rpc('hot_questions'));
+  } finally {
+    await ok(admin.from('app_config').update({ value: was }).eq('key', 'hot_count'));
+  }
+});

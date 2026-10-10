@@ -222,7 +222,7 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup, kinds, pocket] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup, kinds, pocket, hot] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -237,6 +237,8 @@ function useData() {
       supabase.from('powerup_kinds').select('kind,name,rarity,slashes,effect,keeps_days'),
       // Kept effect cards: a Wildcard keeps for 7 days, so a little over a week is enough.
       supabase.from('pocket').select('*').gte('got_at', new Date(Date.now() - 9 * 864e5).toISOString()).order('got_at'),
+      // Hot ones need the 2026-10-28 database update; until it runs, there are none.
+      call('hot_questions').catch(() => []),
     ]);
     // No question for today (the hourly timer may not be running): fill the day, then read the questions again.
     if (!questions.data.some(q => q.daily_date === todayUK())) {
@@ -265,6 +267,8 @@ function useData() {
       me,
       cfg: Object.fromEntries((config.data || []).map(c => [c.key, c.value])),
       stars: new Set((stars.data || []).map(s => s.question_id)),
+      // The most starred and answered questions lately, hottest first.
+      hot: (hot || []).map(Number),
       questions: questions.data,
       byId: Object.fromEntries(questions.data.map(q => [q.id, q])),
       mine: Object.fromEntries(mine.data.map(s => [s.question_id, s])),
@@ -591,6 +595,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
     <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}`}>
       <Chips q={q}>
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
+        {d.hot.includes(q.id) && <span className="chip hot"><Px name="Hot ones" scale={1} /> Hot</span>}
         {starrable(q) && (deck ? d.stars.has(q.id) : !mine || d.stars.has(q.id)) && <StarToggle q={q} d={d} reload={reload} chip />}
         {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
           : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question'
@@ -765,9 +770,12 @@ function dealable(d, today, skip) {
   const qs = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
     && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
     && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
-  // Questions friends wrote come first, then starred ones, then the rest.
-  const rank = q => (q.audience === 'friends' ? 0 : d.stars.has(q.id) ? 1 : 2);
-  return [0, 1, 2].flatMap(r => qs.filter(q => rank(q) === r).map(q => q.id));
+  // Questions friends wrote come first, then starred ones, then hot ones
+  // (hottest first), then the rest.
+  const hot = id => d.hot.indexOf(id);
+  const rank = q => (q.audience === 'friends' ? 0 : d.stars.has(q.id) ? 1 : hot(q.id) >= 0 ? 2 : 3);
+  return [0, 1, 2, 3].flatMap(r => qs.filter(q => rank(q) === r)
+    .sort((a, b) => (r === 2 ? hot(a.id) - hot(b.id) : 0)).map(q => q.id));
 }
 
 // Power-ups: some days the first hand has one in it. For now each one holds
@@ -1027,7 +1035,7 @@ function Today(ctx) {
   const canSwap = id => id !== PU && !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
   const swappable = hand.ids.filter(canSwap);
   // Cards come up in this order: today's question, questions friends wrote (free,
-  // so they're extra cards right after the one on top), starred ones, then the rest.
+  // so they're extra cards right after the one on top), starred ones, hot ones, then the rest.
   // Questions starred since the hand was dealt take the place of the next other
   // unanswered cards, never the card on top.
   const friendQs = d.questions.filter(x => x.audience === 'friends' && !d.mine[x.id]).map(x => x.id);
@@ -1046,7 +1054,7 @@ function Today(ctx) {
     });
   }, [[...d.stars].join(), friendQs.join()]);
   // The hand never holds more cards that use up an answer than you have answers
-  // left: starred ones are kept over the rest, and the others come back another
+  // left: starred ones are kept first, then hot ones, and the others come back another
   // day. Once your answers are gone, what's left is what you've answered and
   // what's free (today's question, and questions friends wrote or sent you).
   const answersLeft = Math.max(d.me.other_answers_left_today, 0);
@@ -1055,7 +1063,8 @@ function Today(ctx) {
     setHand(h => {
       const cards = h.ids.filter(paid);
       if (cards.length <= answersLeft) return h;
-      const keep = new Set([...cards.filter(id => d.stars.has(id)), ...cards.filter(id => !d.stars.has(id))].slice(0, answersLeft));
+      const order = id => (d.stars.has(id) ? 0 : d.hot.includes(id) ? 1 : 2);
+      const keep = new Set([0, 1, 2].flatMap(r => cards.filter(id => order(id) === r)).slice(0, answersLeft));
       const ids = h.ids.filter(id => !paid(id) || keep.has(id));
       // Stay on the same card, or the next one still in the hand.
       let k = h.i;
@@ -1156,6 +1165,8 @@ function Today(ctx) {
   );
 }
 
+const HOT = 'Hot ones';
+
 function Questions(ctx) {
   const { d, inbox } = ctx;
   const [filter, setFilter] = useState('all');
@@ -1170,17 +1181,24 @@ function Questions(ctx) {
     if (d.mine[q.id]) t.done++;
   }
   const themes = Object.values(byTheme).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-  const list = qs.filter(q => (!theme || q.category === theme)
+  // Hot ones: the most starred and answered lately, a theme of their own on top
+  // of the one each question is in.
+  const hotQs = d.hot.filter(id => d.byId[id] && qs.includes(d.byId[id]));
+  const hotTheme = { name: HOT, total: hotQs.length, done: hotQs.filter(id => d.mine[id]).length };
+  const tiles = hotQs.length ? [hotTheme, ...themes] : themes;
+  const inTheme = q => (theme === HOT ? hotQs.includes(q.id) : q.category === theme);
+  const list = qs.filter(q => (!theme || inTheme(q))
     && (filter === 'all' || (filter === 'open' ? !d.mine[q.id] : filter === 'starred' ? d.stars.has(q.id)
-      : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)));
+      : filter === 'sent' ? sent.has(q.id) : q.sensitivity === filter)))
+    .sort((a, b) => (theme === HOT ? hotQs.indexOf(a.id) - hotQs.indexOf(b.id) : 0));
   const starredOpen = qs.filter(q => d.stars.has(q.id) && !d.mine[q.id]).length;
-  const picked = byTheme[theme];
+  const picked = theme === HOT ? hotTheme : byTheme[theme];
   return (
     <>
       <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
       <div className="themes" role="group" aria-label="Themes">
-        {themes.map(t => (
-          <button key={t.name} className="theme" aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
+        {tiles.map(t => (
+          <button key={t.name} className={`theme${t.name === HOT ? ' hot' : ''}`} aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
             <span className="e"><Px name={t.name} /></span>
             <span className="n">{t.done}/{t.total}</span>
             <b>{t.name}</b>
@@ -1193,7 +1211,8 @@ function Questions(ctx) {
       </div>
       <p className="hint" style={{ margin: '4px 2px 10px' }}>
         {picked
-          ? <>{picked.name}: {picked.done} of {picked.total} answered · showing {list.length} · <button className="linkbtn" onClick={() => setTheme(null)}>All themes</button></>
+          ? <>{picked.name}: {picked.done} of {picked.total} answered · showing {list.length} · <button className="linkbtn" onClick={() => setTheme(null)}>All themes</button>
+            {theme === HOT && <><br />The most starred and answered questions in the last {d.cfg.hot_days ?? 7} days, hottest first. They're dealt into Today after your starred ones.</>}</>
           : <>{Object.keys(d.mine).length} answered · showing {list.length}</>}
         <br />{starredOpen
           ? `${starredOpen} starred to answer. They're dealt into Today after friends' questions.`
