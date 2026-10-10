@@ -115,6 +115,12 @@ h3 { font-size: 16px; }
 .split .y { background: var(--hi); color: var(--hi-ink); }
 .split .n { background: var(--surface); color: var(--ink); justify-content: flex-end; flex: 1; }
 .split.pick .y { background: var(--hi); }
+button.split { width: 100%; padding: 0; background: none; text-align: left; }   /* the bar on an answered card opens the stats */
+.stat-row { display: flex; flex-direction: column; gap: 3px; }
+.stat-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.stat-head span:first-child { font-family: var(--display); font-size: 13px; }
+.sheet.stats h3 { margin: 8px 0 0; }
+.sheet.stats h2 { margin: 0; }
 .meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--ink); }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: var(--b) solid var(--ink); border-radius: 7px; overflow: hidden; }
 .seg button { border: 0; border-right: var(--b) solid var(--ink); background: var(--surface); padding: 5px 0; font-family: var(--display); font-size: 13px; color: var(--ink); }

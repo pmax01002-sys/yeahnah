@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase, configured, call } from './supabase.js';
 import { Px } from './icons.jsx';
 import { useDeckMotion } from './deckMotion.js';
@@ -493,6 +494,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
+  const [stats, setStats] = useState(false);
   const challenge = inbox.find(c => c.question_id === q.id);
   const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
 
@@ -554,12 +556,13 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
         </div>
         {split && (
           <>
-            <div className={`split${q.option_yes ? ' pick' : ''}${deck ? ' tall' : ''}`} role="img" aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}`}>
-              <div className="y" style={{ width: `${pct}%` }}>{pct}% {q.option_yes ? q.emoji_yes : 'yeah'}</div>
-              <div className="n">{100 - pct}% {q.option_yes ? q.emoji_no : 'nah'}</div>
-            </div>
+            <button type="button" className={`split${q.option_yes ? ' pick' : ''}${deck ? ' tall' : ''}`} onClick={() => setStats(true)}
+              aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}. See more stats`}>
+              <div className="y" style={{ width: `${pct}%` }}>{pct}% {short(q, true)}</div>
+              <div className="n">{100 - pct}% {short(q, false)}</div>
+            </button>
             <div className="meta">
-              <span>{split.total} answer{split.total === 1 ? '' : 's'} so far</span>
+              <span>{split.total} answer{split.total === 1 ? '' : 's'} so far · <button type="button" className="linkbtn" onClick={() => setStats(true)}>More stats</button></span>
               {friendAns.map(f => <span key={f.handle}>{f.display_name}: {word(q, f.value)}</span>)}
             </div>
           </>
@@ -583,6 +586,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
               Change my answer to {word(q, !mine.value).toLowerCase()} ({d.me.changes_left_today > 1 || inPocket(d, 'second_thoughts').length ? `${d.me.changes_left_today === 1 ? '1 change' : `${d.me.changes_left_today} changes`} left today` : '1 a day'})</button>
           : <p className="hint">You've used today's change of mind.</p>)}
+        {stats && <StatsSheet q={q} mine={mine} friendAns={friendAns} onClose={() => setStats(false)} />}
         {q.created_by === d.me.id && <ShareLink q={q} />}
         {canSend && (sending
           ? <SendPanel q={q} d={d} reload={reload} friendAns={friendAns} onClose={() => setSending(false)} />
@@ -607,6 +611,101 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
       {body}
       <Msg error={error} note={note} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stats behind the bar: tap it for the split among friends, groups, age groups,
+// over time, and who guessed what in Future. Counts only, and each follows the
+// same rules as the names you can see (question_stats in the database).
+// ---------------------------------------------------------------------------
+
+const short = (q, v) => (q.option_yes ? (v ? q.emoji_yes || q.option_yes : q.emoji_no || q.option_no) : v ? 'yeah' : 'nah');
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const dayLabel = day => new Date(`${day}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+
+function StatRow({ q, label, yes, total, unit = ['answer', 'answers'] }) {
+  const pct = total ? Math.round((100 * yes) / total) : 0;
+  return (
+    <div className="stat-row">
+      <div className="stat-head"><span>{label}</span><span>{plural(total, ...unit)}</span></div>
+      <div className={`split${q.option_yes ? ' pick' : ''}`} role="img" aria-label={`${label}: ${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}, from ${plural(total, ...unit)}`}>
+        <div className="y" style={{ width: `${pct}%` }}>{pct}% {short(q, true)}</div>
+        <div className="n">{100 - pct}% {short(q, false)}</div>
+      </div>
+    </div>
+  );
+}
+
+function StatsSheet({ q, mine, friendAns, onClose }) {
+  const [s, setS] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    call('question_stats', { p_question: q.id }).then(setS).catch(() => setError('Stats aren\'t available right now.'));
+  }, [q.id]);
+
+  const all = s?.everyone;
+  const yours = all && (mine.value ? all.yes : all.total - all.yes);
+  const share = all?.total ? Math.round((100 * yours) / all.total) : 0;
+  const you = !all ? '' : all.total <= 1 ? "You're the first to answer."
+    : share > 50 ? `You're with the ${share}% who said ${word(q, mine.value).toLowerCase()}.`
+    : share < 50 ? `You're one of the ${share}% who said ${word(q, mine.value).toLowerCase()}.`
+    : 'It\'s split down the middle.';
+  // The split at the end of each day it moved, then now.
+  const points = s ? s.days.slice(-6) : [];
+  const last = points[points.length - 1];
+  const over = all && (!last || last.total !== all.total) ? [...points, { day: null, yes: all.yes, total: all.total }] : points;
+
+  return createPortal(
+    <div className="scrim" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="sheet stats" role="dialog" aria-modal="true" aria-label="Answer stats">
+        <div className="sheet-top"><button type="button" className="close" onClick={onClose}>Close</button></div>
+        <h2>{q.text}</h2>
+        {!s && <p className="hint">{error || 'Counting…'}</p>}
+        {s && (
+          <>
+            <StatRow q={q} label="Everyone" yes={all.yes} total={all.total} />
+            <div className="hook">{you}</div>
+
+            <h3>Your friends</h3>
+            {s.friends.total ? (
+              <>
+                <StatRow q={q} label="Friends" yes={s.friends.yes} total={s.friends.total} />
+                {friendAns.length > 0 && <p className="hint">{friendAns.map(f => `${f.display_name}: ${word(q, f.value)}`).join(' · ')}</p>}
+              </>
+            ) : <p className="hint">None of your friends have shared an answer to this yet.</p>}
+
+            {s.groups.length > 0 && (
+              <>
+                <h3>Your groups</h3>
+                {s.groups.map(g => <StatRow key={g.name} q={q} label={g.name} yes={g.yes} total={g.total} />)}
+              </>
+            )}
+
+            <h3>By age</h3>
+            {s.ages.length
+              ? s.ages.map(a => <StatRow key={a.band} q={q} label={a.band} yes={a.yes} total={a.total} />)
+              : <p className="hint">Not enough public answers yet to split by age.</p>}
+            <p className="hint">Public answers only. An age group shows once it has {s.min_people}.</p>
+
+            {over.length > 1 && (
+              <>
+                <h3>Over time</h3>
+                {over.map(p => <StatRow key={p.day || 'now'} q={q} label={p.day ? `By ${dayLabel(p.day)}` : 'Now'} yes={p.yes} total={p.total} />)}
+              </>
+            )}
+
+            {s.guesses && (
+              <>
+                <h3>Future guesses</h3>
+                <StatRow q={q} label="Guessed the crowd would say" yes={s.guesses.yes} total={s.guesses.total} unit={['guess', 'guesses']} />
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>,
+    document.querySelector('.app') || document.body,
   );
 }
 
