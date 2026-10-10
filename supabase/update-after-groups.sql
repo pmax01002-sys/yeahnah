@@ -4,8 +4,9 @@
 -- question costs with friend questions, stars, question links, the Future
 -- unlock, power-up and effect cards, unlimited slashes for the owner,
 -- friend requests from question links, the admin area, the daily question
--- in the admin area, sharing any question as a link and Hot ones
--- (supabase/migrations/20261010* to 20261028*).
+-- in the admin area, sharing any question as a link, Hot ones, answering
+-- from a link before signing up and friends' timers starting when the
+-- question is first seen (supabase/migrations/20261010* to 20261030*).
 -- Safe to run more than once, so it doesn't matter if you ran part of it already.
 
 -- Adults only for now, and 79 themed questions in 11 themes.
@@ -2583,5 +2584,246 @@ language sql stable security definer set search_path = '' as $$
 $$;
 revoke execute on function public.hot_questions() from public, anon;
 grant execute on function public.hot_questions() to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Answer before signing up: someone who opens a question link without an
+-- account gets a hand of guest_answers (5) questions, the linked one first,
+-- and sees how everyone answered each one. The answers stay on their phone
+-- until they sign up, then claim_guest_answers saves them to the new profile.
+--
+-- Saved guest answers have source 'link', so they don't use up the day's
+-- answers: a new account still gets its 5 that day. Today's question is only
+-- in the guest hand when it's the one that was linked, so it's still there to
+-- answer after signing up unless it was already answered from the link.
+--
+-- Answers can only be claimed once per account, by an account made in the
+-- last day, so the daily limit can't be dodged by claiming again.
+--
+-- Safe to run twice.
+
+insert into public.app_config (key, value) values ('guest_answers', 5) on conflict (key) do nothing;
+
+alter table public.profiles add column if not exists guest_claimed_at timestamptz;
+
+-- Questions a guest can answer from a link: everyday ones that anyone can see,
+-- nothing sensitive, and not today's or a future daily question.
+create or replace function public.guest_can_answer(q public.questions, p_linked bigint) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select q.status = 'approved' and not q.is_event and q.sensitivity <> 'sensitive'
+     and (q.daily_date is null or q.daily_date <= public.today_uk())
+     and case when q.id = p_linked then true
+              else q.audience = 'public' and q.daily_date is distinct from public.today_uk() end
+$$;
+revoke execute on function public.guest_can_answer(public.questions, bigint) from public, anon, authenticated;
+
+-- The guest hand for a link: the linked question first, then the rest picked
+-- at random. Needs a working link, so the whole bank can't be read without one.
+create or replace function public.guest_hand(p_code text) returns json
+language sql stable security definer set search_path = '' as $$
+  with link as (
+    select l.question_id as id, p.display_name as sharer
+      from public.question_links l
+      join public.questions q on q.id = l.question_id
+      left join public.profiles p on p.id = coalesce(l.shared_by, q.created_by)
+     where l.code = trim(p_code)
+  ),
+  picked as (
+    select q.*, 0 as ord from public.questions q, link where q.id = link.id and public.guest_can_answer(q, link.id)
+    union all
+    (select q.*, 1 from public.questions q, link
+      where q.id <> link.id and public.guest_can_answer(q, link.id)
+        and exists (select 1 from public.questions lq where lq.id = link.id and public.guest_can_answer(lq, link.id))
+      order by random() limit public.cfg('guest_answers') - 1)
+  )
+  select coalesce(json_agg(json_build_object(
+           'id', id, 'text', text, 'category', category, 'sensitivity', sensitivity,
+           'option_yes', option_yes, 'option_no', option_no, 'emoji_yes', emoji_yes, 'emoji_no', emoji_no,
+           'linked', ord = 0, 'by', case when ord = 0 then (select sharer from link) end)
+         order by ord), '[]')
+    from picked
+$$;
+revoke execute on function public.guest_hand(text) from public;
+grant execute on function public.guest_hand(text) to anon, authenticated;
+
+-- How everyone answered one of the questions in a link's guest hand.
+create or replace function public.guest_split(p_code text, p_question bigint) returns json
+language sql stable security definer set search_path = '' as $$
+  select case when exists (select 1 from public.question_links l join public.questions q on q.id = p_question
+                             where l.code = trim(p_code) and public.guest_can_answer(q, l.question_id))
+    then (select json_build_object(
+            'yes', count(*) filter (where value),
+            'no', count(*) filter (where not value),
+            'total', count(*))
+          from public.statements where question_id = p_question and superseded_at is null)
+    end
+$$;
+revoke execute on function public.guest_split(text, bigint) from public;
+grant execute on function public.guest_split(text, bigint) to anon, authenticated;
+
+-- Saves the answers given before signing up: [{"question_id": 1, "value": true}, ...].
+-- Run it after open_question_link, so a friends-only question from the link is
+-- visible. Questions the account can't see or has already answered are
+-- skipped. Returns how many were saved.
+create or replace function public.claim_guest_answers(p_answers jsonb) returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := public.require_profile();
+  me public.profiles;
+  a jsonb;
+  q public.questions;
+  vis public.visibility;
+  saved int := 0;
+begin
+  select * into me from public.profiles where id = uid for update;
+  if me.guest_claimed_at is not null or me.created_at < now() - interval '1 day' then return 0; end if;
+  update public.profiles set guest_claimed_at = now() where id = uid;
+  if jsonb_typeof(p_answers) <> 'array' then return 0; end if;
+
+  for a in select value from jsonb_array_elements(p_answers) limit public.cfg('guest_answers') loop
+    select * into q from public.questions where id = (a->>'question_id')::bigint;
+    continue when not found or jsonb_typeof(a->'value') <> 'boolean'
+      or q.status <> 'approved' or q.is_event or q.sensitivity = 'sensitive'
+      or (q.daily_date is not null and q.daily_date > public.today_uk())
+      or not public.can_see_question(uid, q)
+      or exists (select 1 from public.statements where user_id = uid and question_id = q.id and superseded_at is null);
+    vis := case when q.audience = 'public' and q.sensitivity = 'standard' and public.cfg('new_answers_public') = 1
+                     and public.is_adult(uid)
+                then 'public'::public.visibility else 'friends'::public.visibility end;
+    insert into public.statements (user_id, question_id, value, visibility, source)
+    values (uid, q.id, (a->>'value')::boolean, vis, 'link');
+    saved := saved + 1;
+  end loop;
+  return saved;
+end $$;
+revoke execute on function public.claim_guest_answers(jsonb) from public, anon;
+grant execute on function public.claim_guest_answers(jsonb) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- A question a friend sends you is on the clock only from the first time it's
+-- on your screen, not from when it was sent. Until then the challenge keeps
+-- its length in minutes and expires_at is 'infinity', so it can't run out and
+-- answering it still counts as in time. The app calls see_question when the
+-- card is on screen. Answering it, or using Overtime on it, starts it too.
+--
+-- Every way of sending (send_challenge, make_friend_question) still writes
+-- expires_at as now() + the minutes picked; a trigger turns that into the
+-- minutes and 'infinity', so none of them change here.
+--
+-- Safe to run twice.
+
+alter table public.challenges add column if not exists minutes int;
+alter table public.challenges add column if not exists seen_at timestamptz;
+
+-- Challenges already sent: answered or run-out ones keep their times. Ones
+-- still open get their whole time again from the next time they're seen.
+update public.challenges set
+  minutes = greatest(1, round(extract(epoch from expires_at - created_at) / 60))::int,
+  seen_at = case when answered_at is not null or expires_at <= now() then created_at end,
+  expires_at = case when answered_at is null and expires_at > now() then 'infinity' else expires_at end
+ where minutes is null;
+
+create or replace function public.challenge_timer() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.seen_at is null and new.answered_at is null then
+      new.minutes := coalesce(new.minutes, greatest(1, round(extract(epoch from new.expires_at - now()) / 60))::int);
+      new.expires_at := 'infinity';
+    end if;
+  elsif new.seen_at is null and new.answered_at is not null then
+    -- Answered before the app said it was on screen: it was seen then.
+    new.seen_at := new.answered_at;
+    if new.expires_at = 'infinity' then new.expires_at := new.answered_at + make_interval(mins => new.minutes); end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists challenge_timer on public.challenges;
+create trigger challenge_timer before insert or update on public.challenges
+  for each row execute function public.challenge_timer();
+
+-- Starts the timers on every friend's challenge to p_user for this question
+-- that hasn't started yet. Returns how many started.
+create or replace function public.start_timers(p_user uuid, p_question bigint) returns int
+language plpgsql security definer set search_path = '' as $$
+declare n int;
+begin
+  update public.challenges set seen_at = now(), expires_at = now() + make_interval(mins => minutes)
+   where to_user = p_user and question_id = p_question and seen_at is null and answered_at is null;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke execute on function public.start_timers(uuid, bigint), public.challenge_timer() from public, anon, authenticated;
+
+-- The app calls this when a question's card is on your screen.
+create or replace function public.see_question(p_question bigint) returns int
+language sql security definer set search_path = '' as $$
+  select public.start_timers(public.require_profile(), p_question)
+$$;
+grant execute on function public.see_question(bigint) to authenticated;
+
+-- use_power(): Overtime on a question you haven't opened yet starts its timer
+-- first, so the extra time isn't lost. Otherwise as in 20261023.
+create or replace function public.use_power(p_kind text, p_question bigint default null, p_guess int default null, p_pick text default null)
+returns json language plpgsql security definer set search_path = '' as $$
+declare uid uuid := public.require_profile(); q public.questions; k public.powerup_kinds; pid bigint; nm text;
+begin
+  select name into nm from public.powerup_kinds where kind = p_kind and effect = p_kind;
+  if nm is null then raise exception 'No such card'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 0));
+
+  if p_kind in ('peek', 'mind_reader', 'overtime', 'called_it') then
+    select * into q from public.questions where id = p_question;
+    if not found or not public.can_see_question(uid, q) then raise exception 'Question not found'; end if;
+    if exists (select 1 from public.statements where user_id = uid and question_id = p_question and superseded_at is null) then
+      raise exception 'You''ve already answered that one';
+    end if;
+  end if;
+
+  if p_kind in ('peek', 'mind_reader') then
+    if not public.power_used_on(uid, p_kind, p_question) then
+      if public.pocket_use(uid, p_kind, p_question) is null then raise exception 'You don''t have a % card', nm; end if;
+    end if;
+    if p_kind = 'peek' then return public.question_split(p_question); end if;
+    return (select coalesce(json_agg(f), '[]') from public.friends_answers(p_question) f);
+
+  elsif p_kind = 'overtime' then
+    if not exists (select 1 from public.challenges where to_user = uid and question_id = p_question
+                    and answered_at is null and expires_at > now()) then
+      raise exception 'Overtime works on a question a friend sent you, before its timer runs out';
+    end if;
+    if public.pocket_use(uid, p_kind, p_question) is null then raise exception 'You don''t have an Overtime card'; end if;
+    perform public.start_timers(uid, p_question);
+    update public.challenges set expires_at = expires_at + make_interval(mins => public.cfg('overtime_minutes'))
+     where to_user = uid and question_id = p_question and answered_at is null and expires_at > now();
+    return json_build_object('expires_at', (select max(expires_at) from public.challenges
+                                             where to_user = uid and question_id = p_question));
+
+  elsif p_kind = 'called_it' then
+    if q.daily_date is distinct from public.today_uk() then raise exception 'Called it works on today''s question'; end if;
+    if p_guess is null or p_guess not between 0 and 100 then raise exception 'Guess a number from 0 to 100'; end if;
+    if public.power_used_on(uid, p_kind, p_question) then raise exception 'You''ve already made your guess'; end if;
+    pid := public.pocket_use(uid, p_kind, p_question);
+    if pid is null then raise exception 'You don''t have a Called it card'; end if;
+    update public.pocket set guess = p_guess where id = pid;
+    return json_build_object('guess', p_guess);
+
+  elsif p_kind = 'wildcard' then
+    select * into k from public.powerup_kinds where kind = p_pick and effect is distinct from 'wildcard';
+    if not found then raise exception 'Pick which card it becomes'; end if;
+    pid := public.pocket_use(uid, p_kind, null);
+    if pid is null then raise exception 'You don''t have a Wildcard'; end if;
+    update public.pocket set became = k.kind where id = pid;
+    if k.effect is not null then
+      insert into public.pocket (user_id, kind, expires_on, used_at)
+      values (uid, k.kind, public.today_uk(), case when k.effect = 'extra_hand' then now() end);
+    elsif k.slashes > 0 then
+      insert into public.credit_ledger (user_id, amount, reason) values (uid, k.slashes, 'powerup');
+    end if;
+    return json_build_object('kind', k.kind, 'name', k.name, 'slashes', k.slashes, 'effect', k.effect);
+  end if;
+  raise exception '% works by itself', nm;
+end $$;
 
 notify pgrst, 'reload schema';

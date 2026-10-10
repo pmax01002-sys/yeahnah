@@ -56,6 +56,111 @@ function clearQuestion() {
 }
 pendingQuestion();
 
+// Answers given before signing up, kept on this device until the new profile
+// claims them: { code, ids: the guest hand, answers: { id: true/false } }.
+const GUEST_KEY = 'yeahnah-guest';
+function loadGuest() {
+  try { return JSON.parse(localStorage.getItem(GUEST_KEY)) || null; } catch { return null; }
+}
+function saveGuest(g) {
+  try { localStorage.setItem(GUEST_KEY, JSON.stringify(g)); } catch { /* storage blocked: answers last until reload */ }
+}
+// Saves them to the profile once it exists. Returns how many were saved.
+async function claimGuest() {
+  const g = loadGuest();
+  const answers = Object.entries(g?.answers || {}).map(([id, value]) => ({ question_id: Number(id), value }));
+  if (!answers.length) return 0;
+  const n = await call('claim_guest_answers', { p_answers: answers });
+  try { localStorage.removeItem(GUEST_KEY); } catch { /* none */ }
+  return n;
+}
+
+// A question link opened without an account: answer the linked question and a
+// few more (5 in all), see how everyone answered, then sign up to keep them.
+function GuestHand({ code, onEmpty }) {
+  const [hand, setHand] = useState(null);
+  const [g, setG] = useState(() => {
+    const kept = loadGuest();
+    return kept && kept.code === code ? kept : { code, ids: [], answers: {} };
+  });
+  const [i, setI] = useState(0);
+  const [split, setSplit] = useState(null);
+  useEffect(() => {
+    call('guest_hand', { p_code: code }).then(qs => {
+      if (!qs || !qs.length) return onEmpty();
+      // Keep the hand dealt last time, so a reload doesn't swap the questions.
+      const byId = Object.fromEntries(qs.map(q => [q.id, q]));
+      const kept = g.ids.map(id => byId[id]).filter(Boolean);
+      const list = kept.length === qs.length ? kept : qs;
+      setHand(list);
+      setG(x => ({ ...x, ids: list.map(q => q.id) }));
+      const next = list.findIndex(q => !(q.id in g.answers));
+      setI(next < 0 ? list.length - 1 : next);
+    }).catch(onEmpty);
+  }, [code]);
+  useEffect(() => { if (g.ids.length) saveGuest(g); }, [g]);
+  const q = hand && hand[i];
+  const answered = q && q.id in g.answers;
+  useEffect(() => {
+    setSplit(null);
+    if (answered) call('guest_split', { p_code: code, p_question: q.id }).then(setSplit).catch(() => {});
+  }, [q?.id, answered]);
+  if (!q) return null;
+  const done = hand.filter(x => x.id in g.answers).length;
+  const all = done === hand.length;
+  const value = g.answers[q.id];
+  const opts = q.option_yes
+    ? [[true, q.emoji_yes, q.option_yes], [false, q.emoji_no, q.option_no]]
+    : [[true, null, 'Yeah'], [false, null, 'Nah']];
+  // The split counts everyone else; add this answer so it shows up straight away.
+  const sp = split && { yes: split.yes + (value ? 1 : 0), total: split.total + 1 };
+  const pct = sp ? Math.round((100 * sp.yes) / sp.total) : 0;
+  return (
+    <div className="card shared-q guest">
+      <span className="label">{q.linked ? (q.by ? `${q.by} asked you` : 'You were asked') : `Question ${i + 1} of ${hand.length}`}
+        {' · '}{done} of {hand.length} answered</span>
+      <Chips q={q} />
+      <h2 className="qtext">{q.text}</h2>
+      {answered ? (
+        <>
+          <div className="inline"><span>You said</span><Pill q={q} v={value} /></div>
+          {sp && (
+            <div className={`split${q.option_yes ? ' pick' : ''}`} role="img" aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}`}>
+              <div className="y" style={{ width: `${pct}%` }}>{pct}% {q.option_yes ? q.emoji_yes : 'yeah'}</div>
+              <div className="n">{100 - pct}% {q.option_yes ? q.emoji_no : 'nah'}</div>
+            </div>
+          )}
+          {sp && <p className="hint">{sp.total} answer{sp.total === 1 ? '' : 's'} so far, counting yours.</p>}
+        </>
+      ) : (
+        <div className="answer-row">
+          {opts.map(([v, emoji, label]) => (
+            <button type="button" key={label} className={`big ${q.option_yes ? 'pick' : v ? 'yes' : 'no'}`}
+              onClick={() => setG(x => ({ ...x, answers: { ...x.answers, [q.id]: v } }))}>
+              {emoji && <span className="e" aria-hidden="true">{emoji}</span>}{label}
+            </button>
+          ))}
+        </div>
+      )}
+      {hand.length > 1 && (
+        <div className="guest-nav">
+          <button type="button" className="ghost" onClick={() => setI((i + hand.length - 1) % hand.length)}><Px name="back" /> Back</button>
+          <div className="dots" aria-label="Questions to answer">
+            {hand.map((x, k) => <button type="button" key={x.id} className={`dot${x.id in g.answers ? ' done' : ''}`} aria-current={k === i}
+              aria-label={`Question ${k + 1}`} onClick={() => setI(k)} />)}
+          </div>
+          <button type="button" className="ghost" onClick={() => setI((i + 1) % hand.length)}>Next <Px name="next" /></button>
+        </div>
+      )}
+      <p className="hint">{all
+        ? 'That\'s all of them. Sign up below and your answers are saved to your profile, with a fresh 5 for today on top.'
+        : done
+          ? 'Your answers are kept on this phone. Sign up below to save them to a profile.'
+          : `Answer up to ${hand.length} before you sign up. You see how everyone answered after you vote.`}</p>
+    </div>
+  );
+}
+
 // The question from a link, shown on the sign-up page.
 function QuestionBanner() {
   const [q, setQ] = useState(null);
@@ -101,6 +206,15 @@ function left(expires, now) {
   if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${s}s`;
 }
+// A question a friend sends you is on the clock from the first time it's on
+// your screen. Until then its challenge has the minutes they picked and no end
+// time (expires_at is 'infinity'). Ones from before the 2026-10-30 database
+// update have no minutes and started when they were sent.
+const unseen = c => c.minutes != null && !c.seen_at;
+const msLeft = (c, now) => (unseen(c) ? c.minutes * 60e3 : new Date(c.expires_at) - now);
+const timeLeft = (c, now) => left(now + msLeft(c, now), now);
+const minutesText = m => (m % 1440 === 0 ? `${m / 1440} day${m === 1440 ? '' : 's'}`
+  : m % 60 === 0 ? `${m / 60} hour${m === 60 ? '' : 's'}` : `${m} minute${m === 1 ? '' : 's'}`);
 function Chips({ q, children }) {
   return (
     <div className="chips">
@@ -147,6 +261,8 @@ export default function App() {
 
 function SignIn() {
   const [mode, setMode] = useState(pendingInvite() || pendingQuestion() ? 'signup' : 'signin');
+  // Before the 2026-10-29 database update there's no guest hand, so the link shows as a banner.
+  const [guestCode, setGuestCode] = useState(pendingQuestion());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -169,7 +285,7 @@ function SignIn() {
       <p className="slogan">Believe it? Call it!</p>
       <p className="hint">One yes/no question a day. Your answers build your profile.</p>
       <InviteBanner />
-      <QuestionBanner />
+      {guestCode ? <GuestHand code={guestCode} onEmpty={() => setGuestCode(null)} /> : <QuestionBanner />}
       <div className="seg" role="group" aria-label="Sign in or sign up">
         <button type="button" aria-pressed={mode === 'signin'} onClick={() => setMode('signin')}>Sign in</button>
         <button type="button" aria-pressed={mode === 'signup'} onClick={() => setMode('signup')}>New here</button>
@@ -311,21 +427,31 @@ function Signed() {
   }, [meId]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 7000); return () => clearTimeout(t); } }, [toast]);
 
-  // Open the question from a link once the profile exists.
+  // Open the question from a link once the profile exists, then save the
+  // answers given before signing up (after opening, so a friends' question
+  // from the link can be saved too).
   const [shared, setShared] = useState(null);
   useEffect(() => {
-    const code = meId && pendingQuestion();
-    if (!code) return;
-    clearQuestion();
-    call('open_question_link', { p_code: code })
-      .then(async r => { await reload(); setShared(r); setSheet(r.id); })
-      .catch(e => setToast(e.message));
+    if (!meId) return;
+    const code = pendingQuestion();
+    if (code) clearQuestion();
+    (async () => {
+      let r = null, saved = 0;
+      if (code) try { r = await call('open_question_link', { p_code: code }); } catch (e) { setToast(e.message); }
+      try { saved = await claimGuest(); } catch { /* before the 2026-10-29 database update */ }
+      if (!r && !saved) return;
+      await reload();
+      if (r) { setShared(r); setSheet(r.id); }
+      if (saved) setToast(`Saved your ${saved} answer${saved === 1 ? '' : 's'} from before you signed up. You still have today's ${d?.cfg?.answers_per_day ?? 5}.`);
+    })();
   }, [meId]);
 
   if (!d) return <div className="app" />;
   if (!d.me) return <CreateProfile onDone={reload} />;
 
-  const inbox = d.challenges.filter(c => c.to_user === d.me.id && !c.answered_at && new Date(c.expires_at) > now);
+  // Friends' questions still to answer and not run out, least time left first.
+  const inbox = d.challenges.filter(c => c.to_user === d.me.id && !c.answered_at && msLeft(c, now) > 0)
+    .sort((a, b) => msLeft(a, now) - msLeft(b, now));
   const ctx = { d, reload, open: setSheet, now, inbox };
   const TABS = [['today', 'today', 'Today'], ['questions', 'questions', 'Questions'], ['predict', 'predict', 'Future'], ['friends', 'group', 'Group'], ['profile', 'profile', 'Profile']];
 
@@ -489,7 +615,7 @@ function tintOf(q, d) {
   return q.daily_date === todayUK() ? ' daily' : '';
 }
 
-function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }) {
+function QuestionCard({ q, small, deck, onScreen = true, noAnswers, d, reload, now, inbox, open }) {
   const mine = d.mine[q.id];
   const [vis, setVis] = useState(() => startingVisibility(q, d));
   const [split, setSplit] = useState(null);
@@ -499,6 +625,19 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
   const [sending, setSending] = useState(false);
   const challenge = inbox.find(c => c.question_id === q.id);
   const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
+  // A friend's timer starts once this card is on screen with the app open.
+  const waiting = inbox.some(c => c.question_id === q.id && unseen(c));
+  useEffect(() => {
+    if (!onScreen || !waiting) return;
+    const see = () => {
+      if (document.hidden) return;
+      document.removeEventListener('visibilitychange', see);
+      call('see_question', { p_question: q.id }).then(reload).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', see);
+    see();
+    return () => document.removeEventListener('visibilitychange', see);
+  }, [onScreen, waiting, q.id]);
 
   // Peek and Mind reader show these before you answer.
   const peeked = !!usedOn(d, 'peek', q.id), read = !!usedOn(d, 'mind_reader', q.id);
@@ -553,7 +692,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
     body = (
       <>
         <div className="inline">
-          <span>{mine.source === 'app' ? 'You said' : `${mine.source} says`}</span><Pill q={q} v={mine.value} />
+          <span>{mine.source === 'app' || mine.source === 'link' ? 'You said' : `${mine.source} says`}</span><Pill q={q} v={mine.value} />
           {mine.verified && <span className="chip personal">verified</span>}
         </div>
         {split && (
@@ -604,7 +743,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
         {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
           : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question'
             : d.person[q.created_by] ? `By ${d.person[q.created_by].display_name}` : 'Shared with you'}</span>}
-        {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {left(challenge.expires_at, now)}</span>}
+        {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {timeLeft(challenge, now)}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
       {challenge && !mine && <p className="hint">Answer before the timer runs out for {d.cfg.challenge_reward ?? 2} slashes. Doesn't count towards your daily answers.</p>}
@@ -747,8 +886,7 @@ function shuffle(xs) {
   return a;
 }
 
-// Puts each id at a random spot among the next few cards after `from`, so
-// questions friends send turn up soon (they're on a timer) but mixed in.
+// Puts each id at a random spot among the next few cards after `from`.
 function shuffleIn(deck, newIds, from) {
   const out = [...deck];
   for (const id of newIds) {
@@ -1008,11 +1146,20 @@ function Today(ctx) {
       return missing.length ? { ...h, ids: [...h.ids, ...missing], seen: [...new Set([...h.seen, ...missing])] } : h;
     });
   }, [answeredToday.join()]);
-  // A friend's question is shuffled into the next few cards, including ones that arrive while you're here.
+  // Questions friends send you come up next, right after the card on top, least
+  // time left first (one you haven't seen yet counts as its whole time). When more
+  // arrive, the ones still to come are put back in that order with them.
   useEffect(() => {
     setHand(h => {
       const fresh = inboxIds.filter(id => d.byId[id] && !h.ids.includes(id));
-      return fresh.length ? { ...h, ids: shuffleIn(h.ids, fresh, h.i), seen: [...h.seen, ...fresh] } : h;
+      if (!fresh.length) return h;
+      const top = h.ids[h.i];
+      const coming = new Set(h.ids.filter(id => id !== top && inboxIds.includes(id) && !d.mine[id]));
+      const keep = h.ids.filter(id => !coming.has(id));
+      const at = keep.indexOf(top) + 1;
+      // inboxIds is already least time left first.
+      const sent = inboxIds.filter(id => coming.has(id) || fresh.includes(id));
+      return { ...h, ids: [...keep.slice(0, at), ...sent, ...keep.slice(at)], i: Math.max(at - 1, 0), seen: [...h.seen, ...fresh] };
     });
   }, [inbox.map(c => c.id).join()]);
   // A hand dealt before today's power-up was known gets it shuffled into the next few cards.
@@ -1038,8 +1185,9 @@ function Today(ctx) {
   // Today's question, questions friends sent and starred ones stay put until answered.
   const canSwap = id => id !== PU && !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
   const swappable = hand.ids.filter(canSwap);
-  // Cards come up in this order: today's question, questions friends wrote (free,
-  // so they're extra cards right after the one on top), starred ones, hot ones, then the rest.
+  // Cards come up in this order: today's question, questions friends sent you
+  // (least time left first), questions friends wrote (free, so they're extra
+  // cards), starred ones, hot ones, then the rest.
   // Questions starred since the hand was dealt take the place of the next other
   // unanswered cards, never the card on top.
   const friendQs = d.questions.filter(x => x.audience === 'friends' && !d.mine[x.id]).map(x => x.id);
@@ -1049,7 +1197,10 @@ function Today(ctx) {
       const starred = dealable(d, today, new Set(h.ids)).filter(id => d.stars.has(id) && !byFriend(id));
       if (!friends.length && !starred.length) return h;
       const ids = [...h.ids];
-      ids.splice(Math.min(h.i + 1, ids.length), 0, ...friends);
+      // After any friends' questions on a timer that are next up.
+      let at = Math.min(h.i + 1, ids.length);
+      while (at < ids.length && inboxIds.includes(ids[at]) && !d.mine[ids[at]]) at++;
+      ids.splice(at, 0, ...friends);
       for (let s = 1; s < ids.length && starred.length; s++) {
         const k = (h.i + s) % ids.length;
         if (canSwap(ids[k]) && !byFriend(ids[k])) ids[k] = starred.shift();
@@ -1134,7 +1285,7 @@ function Today(ctx) {
           {hand.ids.filter(id => (id === PU ? d.powerup : d.byId[id])).map(id => (
             <div key={id} ref={motion.cardRef(id)} className={`slot${slots[id] === 0 ? ' top' : ''}`}>
               {id === PU ? <PowerUpCard p={d.powerup} d={d} reload={ctx.reload} />
-                : <QuestionCard q={d.byId[id]} deck noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />}
+                : <QuestionCard q={d.byId[id]} deck onScreen={slots[id] === 0} noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />}
             </div>
           ))}
         </div>
@@ -1503,7 +1654,7 @@ function Friends({ d, reload, open, now, inbox }) {
           {inbox.map(c => (
             <button key={c.id} className="row" onClick={() => open(c.question_id)}>
               <span><span className="t">{d.byId[c.question_id]?.text}</span><span className="hint">from {d.person[c.from_user]?.display_name}</span></span>
-              <span className="chip timer"><Px name="timer" scale={1} /> {left(c.expires_at, now)}</span>
+              <span className="chip timer"><Px name="timer" scale={1} /> {timeLeft(c, now)}</span>
             </button>
           ))}
         </div>
@@ -1680,7 +1831,9 @@ function SentByMe({ d, now }) {
     <div className="section"><h2>You sent</h2>
       {sent.map(c => (
         <p className="hint" key={c.id}>{d.person[c.to_user]?.display_name} · {d.byId[c.question_id]?.text} · {
-          c.answered_at ? 'answered in time' : new Date(c.expires_at) > now ? <><Px name="timer" scale={1} /> {left(c.expires_at, now)}</> : 'ran out of time'}</p>
+          c.answered_at ? 'answered in time'
+            : unseen(c) ? `not seen yet, then ${minutesText(c.minutes)} to answer`
+            : msLeft(c, now) > 0 ? <><Px name="timer" scale={1} /> {timeLeft(c, now)}</> : 'ran out of time'}</p>
       ))}
     </div>
   );
