@@ -5,8 +5,8 @@ prototype's rules enforced on the server. It runs on free tiers.
 
 ```
 web/       the app people use (React, built to a static site)
-supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     35 end-to-end checks of the rules, run through the same API the app uses
+supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes, 12 star-sign packs
+tests/     36 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
@@ -14,6 +14,7 @@ tests/     35 end-to-end checks of the rules, run through the same API the app u
 - Sign up with email and password, then a profile with handle, name and date of birth. **18+ only for now.** The under-18 rules below are still built in, and come back if you lower `min_age` in `app_config` (13 is the floor for UK apps).
 - **Today**: a hand of 5 cards a day, starting with the daily question ("Is the Earth flat?" on launch day). Tap left or right to answer, swipe left for the next card and right to go back. The hand is kept on your phone until the next day, answered cards keep their crowd split and friends' answers, and Shuffle swaps the unanswered ones. Questions friends send you are extra green cards, dealt next with the least time left first, and a pink letter sits on the Today tab until you have answered them all or their timers run out. Star questions in the Questions tab and they're dealt in first, then Hot ones, then the rest. Some days the first hand also has a **power-up card**, common to legendary. Slash cards hold 1 to 10 slashes to claim before midnight. Effect cards go in your pocket to use that day: Second thoughts (an extra change of mind), Free post (next send free, even to a whole group), Peek (the split before you answer), Overtime (an hour more on a friend's question), Mind reader (friends' answers before you answer), Extra hand (3 more cards and answers), Called it (guess today's split for 10 slashes) and Wildcard (becomes any card, keeps 7 days). `powerup_chance` in `app_config` is the percent of days with one (50 to start); each card's odds are rows in `powerup_kinds`, and the effects' numbers (`called_it_prize`, `overtime_minutes`, `extra_hand_cards`...) are in `app_config`.
 - **Themes**: 139 questions in 20 themes, including Sport, Music, Film & TV, Travel, Work, Dating, Food, Mysteries, Future, Nostalgia and Brands. The Questions tab shows each theme with how many you've answered; tap one to see just those. **Hot ones** is an extra theme on top: the questions people have starred and answered most in the last 7 days, hottest first. Answers to the day's daily question and questions written for friends don't count, a question needs stars or answers from at least 3 different people, and only the list is shown, never counts or names. Stars count 3 times as much as answers. The numbers are `hot_days`, `hot_count` (12), `hot_star_weight` and `hot_min_people` in `app_config`. Picks like "Messi or Ronaldo?" show both names as the answer buttons.
+- **Question packs and badges**: a pack is a set of questions dealt into Today as one block: a blue cover card, then its questions in a row. Pack answers don't use up your daily 5, and finishing a pack earns its badge, shown in a Badges section on your profile (only you can see badges for now). To start there's a **Starter Pack for each star sign**, picked by exact date of birth: someone born on 1 October gets the Libra Starter Pack and someone born on 23 October gets Scorpio, since signs change partway through a month. When you finish one, its cover card says how typical of your sign your answers were. You get at most one new pack a day, and an unfinished pack stays in Today until it's done. A pack's questions only ever come as part of it: never one by one, in Hot ones, as the daily question, or in the sign-up hand unless one is the linked question. The Questions tab lists them once you've been dealt the pack. Packs are rows in `packs` (set `star_sign` to deal one to a single sign or leave it empty for everyone, and the lowest `position` is dealt first) with their questions in `pack_questions`, and badges are rows in `badges`.
 - **Answer stats**: tap the yeah/nah bar on a card you've answered (or More stats under it) and the card flips over to its stats: your friends, each of your groups, age groups, how the split moved day by day, and how people guessed in Future. Only counts come back, and they follow the same rules as names: friends and groups count answers shared with friends, age groups count public answers only, and an age group, a day or the guesses only show once at least `stats_min_people` (3) are in, so nobody can be picked out.
 - **5 answers a day**, one always kept for the daily question. **One change of mind a day**, and the changed answer is hidden from others for 7 days.
 - **Who sees each answer**: public, friends or private. Your last choice carries over, except sensitive answers, which always start private. Before you pick one, standard answers start public; set `new_answers_public` to 0 in `app_config` to start them friends-only. Under-18s can never be public.
@@ -39,8 +40,8 @@ You need a GitHub account (free), a Supabase account (free) and a Cloudflare acc
 ### 1. Database: Supabase
 
 1. Create a project at [supabase.com](https://supabase.com). Pick region **West EU (London)** and save the database password somewhere safe.
-2. Open **SQL Editor**, paste the whole of `supabase/setup-all.sql`, and press Run. It builds the database and loads the 139 questions, and today becomes launch day. (It is all the migrations and the seed file joined together.)
-3. Check **Table Editor > questions** shows 141 rows (139 questions and 2 world events).
+2. Open **SQL Editor**, paste the whole of `supabase/setup-all.sql`, and press Run. It builds the database and loads the 139 questions and the star-sign packs, and today becomes launch day. (It is all the migrations and the seed file joined together.)
+3. Check **Table Editor > questions** shows 201 rows (139 questions, 60 star-sign pack questions and 2 world events).
 4. Go to **Authentication > Sign In / Providers > Email** and turn **Confirm email** off. Supabase's built-in email only sends 2 emails an hour and only to your own team, so the demo uses passwords without email confirmation. Turn it back on once you add an email service (see below).
 5. Go to **Project Settings > API** and copy the **Project URL** and the **anon public** key.
 
@@ -48,7 +49,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up and effect cards, unlimited slashes for the owner's account, friend requests from question links, sharing any question as a link, Hot ones, answering from a link before signing up, friends' timers starting when the question is first seen, the Growth dashboard, answer stats) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up and effect cards, unlimited slashes for the owner's account, friend requests from question links, sharing any question as a link, Hot ones, answering from a link before signing up, friends' timers starting when the question is first seen, the Growth dashboard, answer stats, question packs and badges) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
@@ -98,6 +99,13 @@ update questions set daily_date = '2026-10-20' where id = 45;
 insert into questions (text, category, is_event, closes_at)
 values ('Will England beat France on Saturday?', 'World events', true, '2026-10-17 15:00+01');
 select resolve_event(id, true) from questions where text = 'Will England beat France on Saturday?';
+-- make a pack for everyone, with a badge, from questions already in the bank (in this order)
+insert into badges (slug, name, blurb) values ('foodie', 'Foodie', 'Finished the Foodie pack.');
+insert into packs (slug, name, blurb, badge) values ('foodie', 'Foodie pack', 'Five questions about what you eat.', 'foodie');
+insert into pack_questions (pack_id, question_id, position)
+select (select id from packs where slug = 'foodie'), q, k from unnest(array[12, 13, 14, 15, 16]) with ordinality as t(q, k);
+-- stop dealing a pack (it also leaves Today for anyone part-way through it)
+update packs set active = false where slug = 'foodie';
 -- open reports
 select * from reports where status = 'open';
 -- read feedback, newest first, with who sent it

@@ -894,3 +894,62 @@ test('answer stats: friends, groups, age groups and days, following who sees wha
   assert.equal(await ok(alice.rpc('question_stats', { p_question: q })), null);
   await fails(createClient(URL, ANON, opts).rpc('question_stats', { p_question: q }));
 });
+
+test("question packs: your star sign's starter pack, outside the daily five, with a badge at the end", async () => {
+  const lib = await user('libra', '1995-10-01');
+  const sco = await user('scorp', '1995-10-23'); // October too, but after the 22nd
+  const libId = (await me(lib)).id;
+  const p = await ok(lib.rpc('todays_pack'));
+  assert.equal(p.name, 'Libra Starter Pack');
+  assert.equal(p.sign, 'Libra');
+  assert.equal(p.badge, 'Libra');
+  assert.equal(p.badge_slug, 'libra', 'the badge icon is named by its slug');
+  assert.equal(p.questions.length, 5);
+  assert.equal(p.finished, false);
+  assert.ok(!JSON.stringify(p).includes('1995'), 'the date of birth stays in the database');
+  assert.equal((await ok(sco.rpc('todays_pack'))).name, 'Scorpio Starter Pack');
+  assert.equal((await ok(lib.rpc('todays_pack'))).id, p.id, 'the same pack on every device');
+
+  // Pack answers don't use up the daily five, and say so.
+  const before = (await me(lib)).other_answers_left_today;
+  for (const x of p.questions.slice(0, 4)) await ok(lib.rpc('answer', { p_question: x.id, p_value: x.typical }));
+  assert.equal((await me(lib)).other_answers_left_today, before);
+  const s = await ok(lib.from('statements').select('via_pack').eq('question_id', p.questions[0].id).eq('user_id', libId));
+  assert.deepEqual(s, [{ via_pack: true }]);
+  // Someone who wasn't dealt the pack uses up an answer on it, like any question.
+  const left = (await me(sco)).other_answers_left_today;
+  await ok(sco.rpc('answer', { p_question: p.questions[0].id, p_value: true }));
+  assert.equal((await me(sco)).other_answers_left_today, left - 1);
+
+  // The badge comes with the last answer.
+  assert.deepEqual(await ok(lib.from('user_badges').select('badge')), []);
+  await ok(lib.rpc('answer', { p_question: p.questions[4].id, p_value: !p.questions[4].typical }));
+  const done = await ok(lib.rpc('todays_pack'));
+  assert.equal(done.id, p.id, "a pack finished today stays in today's hand");
+  assert.equal(done.finished, true);
+  assert.deepEqual((await ok(lib.from('user_badges').select('badge'))).map(b => b.badge), ['libra']);
+
+  // Only you see your packs and badges, and only the database hands them out.
+  assert.deepEqual(await ok(sco.from('user_badges').select('badge').eq('user_id', libId)), []);
+  assert.deepEqual(await ok(sco.from('pack_deals').select('pack_id').eq('user_id', libId)), []);
+  await fails(sco.from('user_badges').insert({ user_id: (await me(sco)).id, badge: 'scorpio' }));
+  await fails(sco.from('pack_deals').update({ finished_at: new Date().toISOString() }).eq('user_id', (await me(sco)).id).select());
+  assert.equal((await ok(sco.rpc('todays_pack'))).finished, false);
+
+  // Pack questions only come in their pack: never in a guest hand unless linked.
+  const packQs = new Set((await ok(alice.from('pack_questions').select('question_id'))).map(r => r.question_id));
+  assert.equal(packQs.size, 60);
+  const guest = createClient(URL, ANON, opts);
+  const code = await ok(alice.rpc('share_question', { p_question: others[3] }));
+  for (let k = 0; k < 10; k++) {
+    const hand = await ok(guest.rpc('guest_hand', { p_code: code }));
+    assert.equal(hand.length, 5);
+    assert.ok(!hand.some(q => packQs.has(q.id)), 'no pack questions dealt to a guest');
+  }
+  const linked = await ok(guest.rpc('guest_hand', { p_code: await ok(lib.rpc('share_question', { p_question: p.questions[1].id })) }));
+  assert.equal(linked[0].id, p.questions[1].id, 'unless it was the one linked');
+
+  const data = await ok(lib.rpc('export_my_data'));
+  assert.deepEqual(data.packs.map(x => x.pack), ['Libra Starter Pack']);
+  assert.deepEqual(data.badges.map(x => x.badge), ['Libra']);
+});
