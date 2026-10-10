@@ -3,6 +3,7 @@ import { supabase, configured, call } from './supabase.js';
 import { Px } from './icons.jsx';
 import { useDeckMotion } from './deckMotion.js';
 import { PowerUpArt, RARITY } from './powerupArt.jsx';
+import { Avatar, AvatarPicker, teamOf } from './avatars.jsx';
 import Admin, { useAdminSummary } from './Admin.jsx';
 
 // ---------------------------------------------------------------------------
@@ -250,9 +251,13 @@ function useData() {
     // Groups need the 2026-10-09 database update; until it runs, show none.
     const groupRows = groups.data || [], memberRows = members.data || [];
     memberRows.forEach(m => ids.add(m.user_id));
-    const { data: people } = ids.size
-      ? await supabase.from('profiles').select('id,handle,display_name').in('id', [...ids])
-      : { data: [] };
+    // Avatars need the avatars database update; without it, load people without them.
+    const pick = cols => supabase.from('profiles').select(cols).in('id', [...ids]);
+    let people = [];
+    if (ids.size) {
+      const r = await pick('id,handle,display_name,avatar');
+      people = r.error ? (await pick('id,handle,display_name')).data || [] : r.data;
+    }
     const person = Object.fromEntries(people.map(p => [p.id, p]));
     const iFollow = new Set(follows.data.filter(f => f.follower === me.id).map(f => f.followed));
     const followsMe = new Set(follows.data.filter(f => f.followed === me.id).map(f => f.follower));
@@ -1483,7 +1488,7 @@ function Friends({ d, reload, open, now, inbox }) {
             const a = answers && similarity(d, answers[f.id] || []);
             return (
               <button className="row person-row" key={f.id} onClick={() => view(f)}>
-                <span>{f.display_name} <span className="hint">@{f.handle}</span></span>
+                <span className="who"><Avatar value={f.avatar} px={32} /><span>{f.display_name} <span className="hint">@{f.handle}</span></span></span>
                 <span className="agree">{!a ? '' : a.both > 0
                   ? <><b>{a.pct}%</b> <span className="hint">alike on {a.both}</span></>
                   : <span className="hint">nothing in common yet</span>} <Px name="next" scale={1} /></span>
@@ -1564,9 +1569,12 @@ function PersonProfile({ d, who, open, onBack }) {
   return (
     <>
       <button className="linkbtn back" onClick={onBack}><Px name="back" scale={1} /> Group</button>
-      <div className="head" style={{ display: 'block' }}>
+      <div className="head me-head">
+        <Avatar value={card ? card.avatar : who.avatar} px={64} />
+        <div>
         <h1>{name}</h1>
-        <span className="hint">@{who.handle} · {isFriend ? 'Friends' : card?.follows_me ? 'Follows you' : card?.i_follow ? 'Waiting for them to follow back' : 'Not connected'}</span>
+        <span className="hint">@{who.handle}{teamOf(card ? card.avatar : who.avatar) ? ` · Team ${teamOf(card ? card.avatar : who.avatar)}` : ''} · {isFriend ? 'Friends' : card?.follows_me ? 'Follows you' : card?.i_follow ? 'Waiting for them to follow back' : 'Not connected'}</span>
+        </div>
       </div>
       <div className="stats">
         <div className="stat"><b>{sim.pct ?? '–'}{sim.pct != null && '%'}</b><span>{sim.both ? `alike on ${sim.both}` : 'alike'}</span></div>
@@ -1642,6 +1650,7 @@ function SentByMe({ d, now }) {
 
 function Profile({ d, reload }) {
   const [error, setError] = useState('');
+  const [picking, setPicking] = useState(false);
   const facts = Object.values(d.mine).map(s => ({ s, q: d.byId[s.question_id] })).filter(x => x.q)
     .sort((a, b) => a.q.category.localeCompare(b.q.category) || a.q.id - b.q.id);
   const yn = facts.filter(x => !x.q.option_yes);
@@ -1667,10 +1676,16 @@ function Profile({ d, reload }) {
 
   return (
     <>
-      <div className="head" style={{ display: 'block' }}>
-        <h1>{d.me.display_name}</h1>
-        <span className="hint">@{d.me.handle}{d.me.is_adult ? '' : ' · Friends-only profile'}</span>
+      <div className="head me-head">
+        <button className="av-btn" onClick={() => setPicking(!picking)} aria-label="Change your avatar"><Avatar value={d.me.avatar} px={64} /></button>
+        <div>
+          <h1>{d.me.display_name}</h1>
+          <span className="hint">@{d.me.handle}{teamOf(d.me.avatar) ? ` · Team ${teamOf(d.me.avatar)}` : ''}{d.me.is_adult ? '' : ' · Friends-only profile'}</span>
+          <button className="linkbtn" onClick={() => setPicking(!picking)}>{d.me.avatar ? 'Change avatar or team' : 'Pick your avatar and team'}</button>
+        </div>
       </div>
+      {picking && <AvatarPicker value={d.me.avatar} onCancel={() => setPicking(false)}
+        onSave={async v => { await act('set_avatar', { p_avatar: v }); setPicking(false); }} />}
       <div className="stats">
         <div className="stat"><b>{facts.length}</b><span>answers</span></div>
         <div className="stat"><b>{yesPct}%</b><span>said yeah</span></div>
