@@ -783,7 +783,7 @@ test('link guests: answer 5 before signing up, saved without using up the day', 
   assert.ok(hand[0].linked);
   assert.ok(!hand.some(q => q.id === daily.id), "today's question is kept for after signing up");
   assert.ok((await ok(anon.rpc('guest_split', { p_code: code, p_question: others[0] }))).total >= 0);
-  assert.equal(await ok(anon.rpc('guest_hand', { p_code: 'no-such-link' })).length, 0);
+  assert.equal((await ok(anon.rpc('guest_hand', { p_code: 'no-such-link' }))).length, 0);
   await fails(anon.rpc('claim_guest_answers', { p_answers: [] }));
 
   const guest = await user('guest', '1990-01-01');
