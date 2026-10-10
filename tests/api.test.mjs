@@ -772,3 +772,26 @@ test('hot ones: the most starred lately, once enough different people are in, an
     await ok(admin.from('app_config').update({ value: was }).eq('key', 'hot_count'));
   }
 });
+
+test('link guests: answer 5 before signing up, saved without using up the day', async () => {
+  const anon = createClient(URL, ANON, opts);
+  const code = await ok(alice.rpc('share_question', { p_question: others[0] }));
+  const hand = await ok(anon.rpc('guest_hand', { p_code: code }));
+  assert.equal(hand.length, 5);
+  assert.equal(hand[0].id, others[0]);
+  assert.ok(hand[0].linked);
+  assert.ok(!hand.some(q => q.id === daily.id), "today's question is kept for after signing up");
+  assert.ok((await ok(anon.rpc('guest_split', { p_code: code, p_question: others[0] }))).total >= 0);
+  assert.equal(await ok(anon.rpc('guest_hand', { p_code: 'no-such-link' })).length, 0);
+  await fails(anon.rpc('claim_guest_answers', { p_answers: [] }));
+
+  const guest = await user('guest', '1990-01-01');
+  const before = await me(guest);
+  const answers = hand.map((q, k) => ({ question_id: q.id, value: k % 2 === 0 }));
+  assert.equal(await ok(guest.rpc('claim_guest_answers', { p_answers: answers })), 5);
+  const after = await me(guest);
+  assert.equal(after.answers_left_today, before.answers_left_today);
+  assert.equal(after.daily_done, false);
+  // Only once per account.
+  assert.equal(await ok(guest.rpc('claim_guest_answers', { p_answers: [{ question_id: daily.id, value: true }] })), 0);
+});

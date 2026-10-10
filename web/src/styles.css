@@ -164,7 +164,11 @@ h3 { font-size: 16px; }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: var(--ink); transition: left .2s steps(4); }
 .switch[aria-checked="true"] { background: var(--dither); }
 .switch[aria-checked="true"]::after { left: 26px; }
-.center { min-height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 24px 16px; }
+.center { min-height: 100%; display: flex; flex-direction: column; gap: 14px; padding: 24px 16px; }
+.center > * { flex-shrink: 0; }
+/* Centred when it fits, and scrolls from the top when it doesn't. */
+.center > :first-child { margin-top: auto; }
+.center > :last-child { margin-bottom: auto; }
 .big-brand { align-self: flex-start; box-sizing: content-box; width: 160px; height: 56px; padding: 12px 14px; border: var(--b) solid var(--ink); box-shadow: 4px 4px 0 var(--ink); background: var(--logo) center / 160px 56px no-repeat, var(--surface); }
 .slogan { font-family: var(--display); font-weight: 700; font-size: 34px; line-height: .95; text-transform: uppercase; margin: 4px 0 0; text-wrap: balance; }
 .empty { font-size: 13px; }
@@ -231,6 +235,9 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .share .ghost { align-self: flex-start; padding: 6px 12px; font-size: 14px; }
 .share input { border: var(--b) solid var(--ink); background: var(--surface); border-radius: 0; padding: 6px 8px; width: 100%; font-size: 12.5px; }
 .shared-q { text-align: left; }
+.guest { display: grid; gap: 10px; }
+.guest-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.guest-nav .ghost { display: inline-flex; align-items: center; gap: 6px; }
 .shared-by .linkbtn { font-size: inherit; color: inherit; }
 button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
 .chip.group { border-style: dashed; }

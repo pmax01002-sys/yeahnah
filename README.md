@@ -6,7 +6,7 @@ prototype's rules enforced on the server. It runs on free tiers.
 ```
 web/       the app people use (React, built to a static site)
 supabase/  the database: tables, privacy rules, game rules, 139 questions in 20 themes
-tests/     31 end-to-end checks of the rules, run through the same API the app uses
+tests/     32 end-to-end checks of the rules, run through the same API the app uses
 ```
 
 ## What it does
@@ -24,7 +24,7 @@ tests/     31 end-to-end checks of the rules, run through the same API the app u
 - **Feedback** button on every screen, and a **Report** button on an opened question. Both land in the admin inbox.
 - **Admin area** for accounts in the `admins` table (`harley` to start): an Admin button appears in the top bar with a count of what's waiting. Set the daily question for today or any later day, by picking one from the bank or writing a new one. Review questions suggested for everyone (approve, edit, reject with or without giving the slashes back), search and edit or take down any question for everyone, work through reports and feedback with notes, and read the audit log of every suggestion, review and edit, including changes made in the Supabase editors. The database checks every admin action, so the button being hidden isn't what keeps people out. Add an admin in the SQL Editor with `insert into public.admins (user_id) select id from public.profiles where handle = 'handle';`.
 - **Future** (was Predict): guess the crowd on today's question, guess a friend's answer, or guess world events. Each builds a hit rate shown on your profile. It starts locked: unlocking costs 100 slashes once (`future_unlock_cost`) and needs a date of birth showing 18 or over, which keeps throwaway accounts out. After that, guesses are free. The tab explains that prediction markets have no house.
-- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. Any question you write, and any everyday question from the Send panel's Link button, can be shared as your own link: people without an account see it on the sign-up page, and once in they can answer it and send you a friend request. For everyone, it waits for a moderator and costs 5 slashes.
+- **Make a question**: for friends, it's live straight away, only your friends can see it, answers never go public, and it costs 3 slashes however many friends you send it to. Passing a friend question on is free. Any question you write, and any everyday question from the Send panel's Link button, can be shared as your own link. People without an account can answer it and 4 more questions on the sign-up page (`guest_answers` in `app_config`, 5 in all), and see how everyone answered each one. Signing up saves those answers to the new profile without using up that day's answers, and sends you a friend request. Today's question is only in that first hand when it's the one that was linked, so it's still there to answer after signing up. For everyone, it waits for a moderator and costs 5 slashes.
 - **Download my data** (everything held about you, as a file) and **delete my account** (UK GDPR).
 - **Privacy notice** at `/privacy.html` (`web/public/privacy.html`), linked from sign-up and the profile: what's kept, who sees it, how to delete it. Deletion and other requests go through the Feedback button for now; add a name and contact email before sharing beyond friends.
 - Partner apps (Strava etc.) can write verified answers through a server-only function, ready for phase 2.
@@ -47,7 +47,7 @@ Rules that run on a timer (filling tomorrow's daily question, settling crowd gue
 
 ### Updating a database you already set up
 
-Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up and effect cards, unlimited slashes for the owner's account, friend requests from question links, sharing any question as a link, Hot ones) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
+Run only the migration files newer than your setup, in date order, in the SQL Editor. If you set up with friend groups but before 2026-10-10, paste `supabase/update-after-groups.sql` instead: it holds every later update (18+ and themes, the privacy fixes, the complete data download, avatars, slashes, question costs and friend questions, stars, question links, the Future unlock, power-up and effect cards, unlimited slashes for the owner's account, friend requests from question links, sharing any question as a link, Hot ones, answering from a link before signing up) and is safe to run more than once. If you set up before friend groups existed, run `supabase/migrations/20261009000000_groups.sql` first.
 
 ### 2. App: Cloudflare Pages
 
