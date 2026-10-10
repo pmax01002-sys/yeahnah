@@ -409,7 +409,9 @@ function SharedBy({ shared, setShared, d }) {
 }
 
 // A link to a question you wrote. Anyone who opens it can answer, signing up first if they need to.
-function ShareLink({ q }) {
+// A question's link (your own one, so whoever opens it sees it came from you):
+// the phone's share menu where there is one, otherwise copied.
+function useShareLink(q) {
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
@@ -426,6 +428,13 @@ function ShareLink({ q }) {
       catch { setNote('Copy the link above.'); }
     } catch (e) { setError(e.message); }
   }
+  return { url, note, error, share };
+}
+// Anyone can share an everyday question; a question for friends only by whoever wrote it.
+const linkable = (q, d) => q.created_by === d.me.id || (q.audience !== 'friends' && !q.is_event && q.sensitivity !== 'sensitive');
+
+function ShareLink({ q }) {
+  const { url, note, error, share } = useShareLink(q);
   return (
     <div className="share">
       <button type="button" className="ghost" onClick={share}><Px name="send" /> Share as a link</button>
@@ -645,6 +654,7 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
   const sent = new Set(d.challenges.filter(c => c.from_user === d.me.id && c.question_id === q.id).map(c => d.person[c.to_user]?.handle));
   const blocked = h => (answered.has(h) ? 'answered' : sent.has(h) ? 'sent' : '');
   const total = picked.length * cost;
+  const link = useShareLink(q);
 
   async function send() {
     setBusy(true); setError(''); setNote('');
@@ -661,7 +671,10 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
 
   return (
     <div className="panel send">
-      <span className="label">Send to friends: {cost ? `${cost} slashes each` : freePost ? 'free with your Free post' : 'free for a friend question'}. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
+      <div className="send-head">
+        <span className="label">Send to friends: {cost ? `${cost} slashes each` : freePost ? 'free with your Free post' : 'free for a friend question'}. They get {d.cfg.challenge_reward ?? 2} if they answer in time.</span>
+        <button className="linkbtn" onClick={onClose}>Close</button>
+      </div>
       <FriendPicker d={d} picked={picked} setPicked={setPicked} blocked={blocked} />
       <div className="seg" role="group" aria-label="Timer">
         {TIMERS.map(([m, l]) => <button key={m} aria-pressed={timer === m} onClick={() => setTimer(m)}>{l}</button>)}
@@ -670,8 +683,10 @@ function SendPanel({ q, d, reload, friendAns, onClose }) {
         <button className="solid" disabled={!picked.length || busy || total > d.me.credits} onClick={send}>
           {busy ? 'Sending…' : picked.length ? `Send to ${picked.length} · ${total ? `${total} slashes` : 'free'}` : 'Pick who gets it'}
         </button>
-        <button className="linkbtn" onClick={onClose}>Close</button>
+        {linkable(q, d) && <button className="ghost link-btn" onClick={link.share}>Link</button>}
       </div>
+      {link.url && <input className="link-url" readOnly value={link.url} onFocus={e => e.target.select()} aria-label="Link to this question" />}
+      <Msg error={link.error} note={link.note} />
       {total > d.me.credits && <p className="hint">You have {d.me.credits} slashes.</p>}
       <Msg error={error} note={note} />
     </div>

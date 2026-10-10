@@ -214,6 +214,10 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .dot[aria-current="true"] { transform: translateY(-3px); box-shadow: 2px 2px 0 var(--ink); }
 .deck-end { text-align: left; }
 .send-btn { align-self: flex-start; padding: 6px 12px; font-size: 14px; }
+.send-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.send-head .linkbtn { flex: none; }
+.send .link-btn { padding: 9px 16px; }
+.send .link-url { border: var(--b) solid var(--ink); background: var(--surface); border-radius: 0; padding: 6px 8px; width: 100%; font-size: 12.5px; }
 .picker { display: flex; flex-direction: column; gap: 8px; }
 .picker .chips { gap: 8px; }
 .picker .chip { font-size: 13px; padding: 2px 9px; }

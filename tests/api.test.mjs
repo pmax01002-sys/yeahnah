@@ -443,7 +443,7 @@ test('question links: anyone with the link can see and answer, even signed out f
   // A friends-only question made just to share by link: no friends picked.
   const q = await ok(maker.rpc('make_friend_question', { p_text: 'Would you go to space for a week?', p_value: true, p_handles: [] }));
   assert.equal((await me(maker)).credits, 7);
-  await fails(newbie.rpc('share_question', { p_question: q }), /questions you wrote/);
+  await fails(newbie.rpc('share_question', { p_question: q }), /Only the person who wrote/);
   const code = await ok(maker.rpc('share_question', { p_question: q }));
   assert.equal(await ok(maker.rpc('share_question', { p_question: q })), code, 'one link per question');
 
@@ -481,6 +481,32 @@ test('question links: anyone with the link can see and answer, even signed out f
   await fails(newbie.rpc('open_question_link', { p_code: pcode }), /waiting for a moderator/);
   await ok(admin.from('questions').update({ status: 'approved' }).eq('id', pq));
   assert.equal((await ok(newbie.rpc('open_question_link', { p_code: pcode }))).id, pq);
+});
+
+test('question links: anyone can share an everyday question, and the link is theirs', async () => {
+  const [ana, ben, newcomer] = [await user('linkana', '1990-08-01'), await user('linkben', '1990-08-02'), await user('linknew', '1990-08-03')];
+  const q = others[12];
+  const code = await ok(ana.rpc('share_question', { p_question: q }));
+  assert.equal(await ok(ana.rpc('share_question', { p_question: q })), code);
+  const bcode = await ok(ben.rpc('share_question', { p_question: q }));
+  assert.notEqual(bcode, code, 'each sharer has their own link');
+  const anon = createClient(URL, ANON, opts);
+  assert.equal((await ok(anon.rpc('question_preview', { p_code: code }))).by, 'linkana');
+  // Opening it sends the friend request to whoever shared it.
+  const opened = await ok(newcomer.rpc('open_question_link', { p_code: code }));
+  assert.equal(opened.id, q);
+  assert.equal(opened.by, 'linkana');
+  assert.equal(opened.by_id, (await me(ana)).id);
+  assert.equal(opened.requested, true);
+  // Sensitive questions, events and tomorrow's daily can't be shared.
+  const all = await ok(admin.from('questions').select('id,sensitivity,is_event,daily_date,audience'));
+  const sensitive = all.find(x => x.sensitivity === 'sensitive');
+  await fails(ana.rpc('share_question', { p_question: sensitive.id }), /can't be shared/);
+  const event = all.find(x => x.is_event);
+  if (event) await fails(ana.rpc('share_question', { p_question: event.id }), /can't be shared/);
+  const ukToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const tomorrow = all.find(x => x.daily_date && x.daily_date > ukToday);
+  if (tomorrow) await fails(ana.rpc('share_question', { p_question: tomorrow.id }), /can't be shared/);
 });
 
 test('power-ups: drawn once a day, claimed once for slashes', async () => {
@@ -654,7 +680,7 @@ test('feedback lands in a table only its author (and the owner) can read', async
 });
 
 test('admins review suggestions, reports and feedback; everyone else is kept out', async () => {
-  const w = await user('writer', '1990-01-01');
+  const w = await user('suggester', '1990-01-01');
   const mod = await user('mod', '1990-01-01');
   const qid = await ok(w.rpc('submit_question', { p_text: `Admin check ${run}?`, p_category: 'General' }));
   await ok(w.rpc('report', { p_reason: 'Testing reports', p_question: qid }));
