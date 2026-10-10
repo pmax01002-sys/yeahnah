@@ -304,3 +304,30 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .av-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .av-grid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--ink); background: var(--surface); font-family: var(--display); font-size: 12px; }
 .av-grid button[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
+
+/* Admin > Growth */
+.vhead { display: flex; align-items: center; gap: 12px; }
+.vhead b { font-family: var(--display); font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; }
+.vhead span { font-size: 12px; }
+.chart { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.chart svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
+.chart .line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.chart .target { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.chart .base { stroke: var(--ink); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .dot { fill: var(--surface); stroke: var(--ink); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart .bar { fill: var(--ink); }
+.chart .bar.open { fill: var(--surface); stroke: var(--ink); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart g.on .bar:not(.open) { fill: var(--yes); }
+.chart g.on .bar.open { stroke: var(--yes); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--ink); }
+.sw.fill-solid { background: var(--ink); }
+.sw.fill-dither { background: var(--dither); }
+.sw.fill-open { background: var(--surface); }
+.mix { display: flex; height: 18px; gap: 2px; }
+.mix .sw { height: 100%; width: auto; flex-basis: 0; min-width: 4px; }
+.cohorts { display: grid; gap: 2px; font-size: 12px; overflow-x: auto; }
+.cohorts [role="row"] { display: grid; grid-template-columns: 56px 52px repeat(5, 1fr); gap: 2px; align-items: center; }
+.cohorts .cell { text-align: center; padding: 3px 0; border: 1px solid var(--ink); min-height: 22px; }
