@@ -358,7 +358,7 @@ function useData() {
       call('hot_questions').catch(() => []),
       // Question packs and badges need the 2026-11-10 database update; until it runs, there are none.
       call('todays_pack').catch(() => null),
-      supabase.from('packs').select('id,name,pack_questions(question_id,position,typical)'),
+      supabase.from('packs').select('id,name,badge,pack_questions(question_id,position,typical)'),
       supabase.from('pack_deals').select('pack_id'),
       supabase.from('user_badges').select('badge,earned_at,badges(name,blurb)').order('earned_at'),
     ]);
@@ -393,7 +393,7 @@ function useData() {
     const packOf = {};
     for (const pk of packs.data || []) {
       const qs = [...pk.pack_questions].sort((a, b) => a.position - b.position);
-      qs.forEach((x, k) => { packOf[x.question_id] = { name: pk.name, n: k + 1, of: qs.length, mine: dealt.has(pk.id) }; });
+      qs.forEach((x, k) => { packOf[x.question_id] = { name: pk.name, badge: pk.badge, n: k + 1, of: qs.length, mine: dealt.has(pk.id) }; });
     }
     setD({
       me,
@@ -793,7 +793,7 @@ function QuestionCard({ q, small, deck, onScreen = true, noAnswers, d, reload, n
           : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question'
             : d.person[q.created_by] ? `By ${d.person[q.created_by].display_name}` : 'Shared with you'}</span>}
         {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {timeLeft(challenge, now)}</span>}
-        {inPack && <span className="chip pack">{inPack.name} · {inPack.n} of {inPack.of}</span>}
+        {inPack && <span className="chip pack">{inPack.badge && <Px name={inPack.badge} scale={1} />}{inPack.name} · {inPack.n} of {inPack.of}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
       {challenge && !mine && <p className="hint">Answer before the timer runs out for {d.cfg.challenge_reward ?? 2} slashes. Doesn't count towards your daily answers.</p>}
@@ -1202,7 +1202,7 @@ function PackCard({ pack, d }) {
         <span className="chip">{plural(qs.length, 'card')}</span>
       </div>
       <div className="pu-art pack-art" aria-hidden="true">
-        <Px name={pack.sign || d.byId[qs[0]?.id]?.category} scale={5} />
+        <Px name={pack.badge_slug || d.byId[qs[0]?.id]?.category} scale={5} />
         <span className="w">{done ? 'Finished' : `${answered.length} of ${qs.length} answered`}</span>
       </div>
       <h2 className="qtext">{pack.name}</h2>
@@ -1210,7 +1210,7 @@ function PackCard({ pack, d }) {
       {done ? (
         <>
           {verdict && <p className="fx">{verdict}</p>}
-          {pack.badge && <p className="pu-done"><Px name="star-on" /> {pack.badge} badge added to your profile.</p>}
+          {pack.badge && <p className="pu-done"><Px name={pack.badge_slug} /> {pack.badge} badge added to your profile.</p>}
         </>
       ) : (
         <p className="hint">Swipe on for its {plural(left, 'card')}. Pack answers don't use up your daily answers{pack.badge ? `, and finishing earns the ${pack.badge} badge` : ''}.</p>
@@ -2114,7 +2114,7 @@ function Profile({ d, reload }) {
                 <div className="badges">
                   {d.badges.map(b => (
                     <div className="badge" key={b.slug}>
-                      <span className="badge-art"><Px name={b.name} scale={3} /></span>
+                      <span className="badge-art"><Px name={b.slug} scale={3} /></span>
                       <span><b>{b.name}</b><span className="hint">{b.blurb} Earned {new Date(b.earned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.</span></span>
                     </div>
                   ))}

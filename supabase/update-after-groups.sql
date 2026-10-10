@@ -3314,7 +3314,7 @@ begin
   if pid is null then return null; end if;
   return (select json_build_object(
             'id', p.id, 'slug', p.slug, 'name', p.name, 'blurb', p.blurb,
-            'sign', initcap(p.star_sign), 'badge', b.name,
+            'sign', initcap(p.star_sign), 'badge', b.name, 'badge_slug', p.badge,
             'dealt_on', d.dealt_on, 'finished', d.finished_at is not null,
             'questions', (select coalesce(json_agg(json_build_object('id', pq.question_id, 'typical', pq.typical)
                                                    order by pq.position), '[]')

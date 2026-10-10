@@ -903,6 +903,7 @@ test("question packs: your star sign's starter pack, outside the daily five, wit
   assert.equal(p.name, 'Libra Starter Pack');
   assert.equal(p.sign, 'Libra');
   assert.equal(p.badge, 'Libra');
+  assert.equal(p.badge_slug, 'libra', 'the badge icon is named by its slug');
   assert.equal(p.questions.length, 5);
   assert.equal(p.finished, false);
   assert.ok(!JSON.stringify(p).includes('1995'), 'the date of birth stays in the database');

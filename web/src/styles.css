@@ -272,7 +272,7 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .card.friend { background: var(--friend); }
 .chip.friend { background: var(--friend); font-weight: 600; }
 .card.pack { background: var(--pack); }
-.chip.pack { background: var(--pack); font-weight: 600; }
+.chip.pack { background: var(--pack); font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
 .card.daily .panel, .card.friend .panel, .card.pack .panel { background: transparent; }
 
 /* A question pack's cover card in Today (PackCard): the art panel from the power-up cards, with the pack's icon. */
@@ -283,7 +283,7 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 /* Profile: badges earned by finishing packs. */
 .badges { display: grid; gap: 10px; }
 .badge { display: flex; align-items: center; gap: 12px; }
-.badge-art { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border: var(--b) solid var(--ink); background: var(--pack); box-shadow: 2px 2px 0 var(--ink); }
+.badge-art { flex: none; display: grid; place-items: center; }  /* the badge's pixel coin, named by its slug in icons.jsx */
 .badge b { display: block; font-family: var(--display); }
 .badge .hint { display: block; margin: 0; }
 @media (prefers-reduced-motion: reduce) { .deck .split .y { animation: none !important; } }
