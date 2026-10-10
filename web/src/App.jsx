@@ -1543,7 +1543,7 @@ function MakeQuestion({ d, reload, themes }) {
       <input required minLength={5} maxLength={140} aria-label="Your question" value={text} onChange={e => { setText(e.target.value); setMade(null); }}
         placeholder={forFriends ? 'Would you eat a bug for a tenner?' : 'Is cereal a soup?'} />
       <p className="hint">{forFriends
-        ? `Only your friends and people you share the link with can see it, so there's no approval. ${fq} slashes, however many friends you send it to, and passing it on is free.`
+        ? `Only the friends you send it to and people you share the link with can see it, so there's no approval. ${fq} slashes, however many friends you send it to, and passing it on is free.`
         : `A moderator checks it before it goes live for everyone. ${pub} slashes, up to 3 a day.`}</p>
       {!open ? null : forFriends ? (d.friends.length === 0
         ? <p className="hint">Add friends in the Group tab first.</p>

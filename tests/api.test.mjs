@@ -421,6 +421,37 @@ test('friend questions: no approval, only friends see them, 3 slashes to make an
   await fails(writer.rpc('submit_question', { p_text: 'Is cereal a soup?' }), /costs 5 slashes and you have 0/);
 });
 
+test('friend questions: only the friends it was sent to see it, not every friend of the writer', async () => {
+  const [w, sent, other] = [await user('fqw', '1990-07-07'), await user('fqsent', '1991-07-07'), await user('fqother', '1992-07-07')];
+  const g = await ok(w.rpc('create_group', { p_name: 'Sent only' }));
+  for (const c of [sent, other]) await ok(c.rpc('join_group', { p_code: g.invite_code }));
+  const sees = async (c, q) => (await ok(c.from('questions').select('id').eq('id', q))).length === 1;
+
+  const q = await ok(w.rpc('make_friend_question', { p_text: `Sent to one friend ${run}?`, p_value: true, p_handles: [sent.handle] }));
+  assert.ok(await sees(w, q));
+  assert.ok(await sees(sent, q));
+  assert.ok(!(await sees(other, q)), "a friend it wasn't sent to doesn't see it");
+  await fails(other.rpc('answer', { p_question: q, p_value: true }), /not found/);
+
+  // Passed on by someone it was sent to: then they see it.
+  await ok(sent.rpc('answer', { p_question: q, p_value: false }));
+  await ok(sent.rpc('send_challenge', { p_handle: other.handle, p_question: q, p_minutes: 60 }));
+  assert.ok(await sees(other, q));
+
+  // Made without sending it: only the writer, until it's sent or its link is opened.
+  const solo = await ok(w.rpc('make_friend_question', { p_text: `Not sent yet ${run}?`, p_value: false, p_handles: [] }));
+  assert.ok(!(await sees(sent, solo)) && !(await sees(other, solo)));
+  const code = await ok(w.rpc('share_question', { p_question: solo }));
+  await ok(sent.rpc('open_question_link', { p_code: code }));
+  assert.ok(await sees(sent, solo));
+  assert.ok(!(await sees(other, solo)));
+
+  // Someone who answered it before this change keeps their question.
+  const old = await ok(w.rpc('make_friend_question', { p_text: `Answered before ${run}?`, p_value: true, p_handles: [] }));
+  await ok(admin.from('statements').insert({ user_id: (await me(other)).id, question_id: old, value: true, visibility: 'friends' }));
+  assert.ok(await sees(other, old));
+});
+
 test('stars: only yours, and only on questions you can see', async () => {
   const [a, b] = [await user('stara', '1990-06-06'), await user('starb', '1991-06-06')];
   const q = others[3];
