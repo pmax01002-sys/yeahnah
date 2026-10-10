@@ -13,7 +13,7 @@
   --desk: #FF6EC7; --dot: #D93A95;                       /* pink desk behind the app on wider screens */
   --bg: var(--desk); --frame: #FBFBF8; --surface: #FBFBF8; --ink: #141414; --muted: #141414; --line: #141414;
   --hi: #141414; --hi-ink: #FBFBF8;                       /* selected / inverted */
-  --yes: #1D7A45; --no: #C8352B;                          /* brand pops: logo and answer pips */
+  --yes: #1D7A45; --no: #C8352B;                          /* brand pops: the logo's Y and answer pips (its N is the desk pink) */
   --oa: #2F62C9; --ob: #B7790B; --sen: #8E3381;
   --dither: repeating-conic-gradient(var(--ink) 0 25%, var(--surface) 0 50%) 0 0 / 4px 4px;
   --stripes: repeating-linear-gradient(var(--surface) 0 3px, var(--ink) 3px 4px);
@@ -23,7 +23,7 @@
   --b: 2px;
   --daily: #FFE3F3;                                       /* tint for today's question, from the desk pink */
   --friend: #DDF2E4;                                      /* tint for a question a friend sent, from the yeah green */
-  --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23C8352B' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");    /* the pixel Y/N, 20x7 */
+  --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FF6EC7' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");    /* the pixel Y/N, 20x7 */
   color-scheme: light;
 }
 /* Phosphor: green screen on a dark plum desk. Paper is the default look for everyone,
@@ -259,9 +259,10 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 /* Group tab: a friend's row opens their profile */
 .person-row .agree { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .linkbtn.back { display: inline-flex; align-items: center; gap: 6px; margin: 4px 2px 0; text-decoration: none; font-family: var(--display); font-size: 13px; }
-/* Avatars: 16x16 sprites at whole-number scales. The tone is the team: green Yeah, red Nah. */
-:root { --av-red: var(--no); --av-green: var(--yes); }
-:root[data-theme="phosphor"] { --av-green: #55B84A; }  /* Phosphor's yeah is the ink colour, so the green team needs its own */
+/* Avatars: 16x16 sprites at whole-number scales. The tone is the team: green Yeah, red Nah.
+   On Paper, Team Nah wears the desk pink, like the logo's N; on Phosphor it keeps the nah orange. */
+:root { --av-red: var(--desk); --av-green: var(--yes); }
+:root[data-theme="phosphor"] { --av-red: var(--no); --av-green: #55B84A; }  /* Phosphor's yeah is the ink colour, so the green team needs its own */
 .av { display: block; flex: none; border: var(--b) solid var(--ink); }
 .who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .me-head { display: flex; align-items: center; gap: 14px; justify-content: flex-start; }
@@ -272,7 +273,8 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 .av-team.green { color: var(--av-green); } .av-team.red { color: var(--av-red); }
 .av-team[aria-pressed="true"] { box-shadow: inset 0 0 0 2px currentColor; outline: var(--b) solid currentColor; outline-offset: -6px; }
 .av-team[aria-pressed="true"].green { background: var(--friend); }
-.av-team[aria-pressed="true"].red { background: var(--daily); }
+.av-team[aria-pressed="true"].red { background: var(--av-red); color: var(--ink); }  /* pink text on a pale pink tint was too faint */
+:root[data-theme="phosphor"] .av-team[aria-pressed="true"].red { background: var(--daily); color: var(--av-red); }
 .av-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .av-grid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--ink); background: var(--surface); font-family: var(--display); font-size: 12px; }
 .av-grid button[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
