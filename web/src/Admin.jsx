@@ -6,7 +6,7 @@ import { call } from './supabase.js';
 // checked in the database too, so this screen opening is not the protection.
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [['review', 'Review'], ['daily', 'Daily'], ['questions', 'Questions'], ['reports', 'Reports'], ['feedback', 'Feedback'], ['log', 'Audit log']];
+const SECTIONS = [['review', 'Review'], ['growth', 'Growth'], ['daily', 'Daily'], ['questions', 'Questions'], ['reports', 'Reports'], ['feedback', 'Feedback'], ['log', 'Audit log']];
 const who = h => (h ? `@${h}` : 'the SQL Editor');
 const when = t => (t ? new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
@@ -65,6 +65,7 @@ export default function Admin({ summary, onChanged, onClose, themes }) {
         ))}
       </div>
       {section === 'review' && <QuestionList {...ctx} status="pending" key="review" />}
+      {section === 'growth' && <Growth />}
       {section === 'daily' && <Daily {...ctx} />}
       {section === 'questions' && <QuestionList {...ctx} key="all" />}
       {section === 'reports' && <Reports {...ctx} />}
@@ -432,5 +433,217 @@ function DailyPicker({ date, isToday, answered, themes, onDone, onCancel }) {
       <Err error={error} />
       <button className="linkbtn" onClick={onCancel}>Cancel</button>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Growth: is yeah/nah spreading? Totals and trends only, never people.
+// ---------------------------------------------------------------------------
+
+const RANGES = [[7, '7 days'], [28, '28 days'], [90, '90 days']];
+const METRICS = [
+  ['answerers', 'Active', n => (n === 1 ? 'person answered' : 'people answered')],
+  ['signups', 'Sign-ups', n => (n === 1 ? 'new person' : 'new people'), 'link_signups'],
+  ['answers', 'Answers', n => (n === 1 ? 'answer' : 'answers')],
+  ['sends', 'Sends', n => (n === 1 ? 'question sent to friends' : 'questions sent to friends'), 'sends_answered'],
+  ['link_opens', 'Link opens', n => (n === 1 ? 'question link opened' : 'question links opened')],
+];
+const pct = (a, b) => (b ? Math.round((100 * a) / b) : null);
+const shortDay = d => new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+function Growth() {
+  const [days, setDays] = useState(28);
+  const [g, , error] = useList('admin_growth', { p_days: days });
+  if (!g) return <><Filters value={days} onChange={setDays} options={RANGES} /><Err error={error} />{!error && <p className="empty">Counting…</p>}</>;
+  const v = g.virality;
+  const came = g.came_from;
+  const newPeople = came.group + came.link + came.direct;
+  return (
+    <div className="rows">
+      <Filters value={days} onChange={setDays} options={RANGES} />
+      <Err error={error} />
+
+      <div className="panel">
+        <span className="label">Virality this week</span>
+        <div className="vhead">
+          <b>{Number(v.v_measured).toFixed(2)}</b>
+          <span>1.00 is target pace. Above it, every active person brings in more than the target; below it, the app is spreading slower.</span>
+        </div>
+        <Spark points={g.virality_trend.map(d => ({ x: d.day, y: Number(d.v) }))} target={1} label="Virality by day" />
+        <div className="stats">
+          <div className="stat"><b>{Number(v.spread).toFixed(2)}</b><span>spread · target {Number(v.spread_target).toFixed(2)}</span></div>
+          <div className="stat"><b>{Number(v.growth).toFixed(2)}</b><span>growth · target {Number(v.growth_target).toFixed(2)}</span></div>
+          <div className="stat"><b>{v.weekly_active}</b><span>weekly active</span></div>
+        </div>
+        <p className="hint">Spread is answered sends per weekly active person; growth is people who joined through a group or question link, per weekly active person. Weekly active means 3+ answers and one in the last 7 days. v weighs spread {Math.round(v.spread_weight * 100)}% and growth the rest.</p>
+        {v.v_is_manual && <p className="hint">Fewer than {v.min_people} weekly active people, so slashtax uses the set v of {Number(v.v).toFixed(2)} for now. The measured number above is shown to watch, not to act on.</p>}
+      </div>
+
+      <div className="stats">
+        <div className="stat"><b>{g.people}</b><span>people</span></div>
+        <div className="stat"><b>{g.active.week}</b><span>active this week</span></div>
+        <div className="stat"><b>{g.active.today}</b><span>active today</span></div>
+      </div>
+      <div className="stats">
+        <div className="stat"><b>{pct(g.active.today, g.active.month) ?? '–'}{g.active.month ? '%' : ''}</b><span>of the month's people active today</span></div>
+        <div className="stat"><b>{g.retention.day1 ?? '–'}{g.retention.day1 != null ? '%' : ''}</b><span>came back the next day</span></div>
+        <div className="stat"><b>{g.send_answer_rate ?? '–'}{g.send_answer_rate != null ? '%' : ''}</b><span>sends answered in time</span></div>
+      </div>
+
+      <div className="panel">
+        <span className="label">This week against last week</span>
+        {[['signups', 'Sign-ups'], ['answers', 'Answers'], ['sends', 'Questions sent'], ['link_opens', 'Question links opened']].map(([k, label]) => {
+          const [now, before] = g.week[k];
+          const change = before ? Math.round((100 * (now - before)) / before) : null;
+          return (
+            <div className="toggle-row" key={k}>
+              <span>{label}</span>
+              <span className="num">{now} <span className="hint">{change == null ? (now ? 'new' : '') : change === 0 ? 'same as last week' : `${change > 0 ? '▲' : '▼'} ${Math.abs(change)}% (was ${before})`}</span></span>
+            </div>
+          );
+        })}
+      </div>
+
+      <DailyChart rows={g.daily} />
+
+      <div className="panel">
+        <span className="label">Where new people came from · last {g.days} days</span>
+        {newPeople === 0 ? <p className="hint">Nobody new in this range.</p> : <>
+          <Split parts={[['Group invite', came.group, 'fill-solid'], ['Question link', came.link, 'fill-dither'], ['Found it themselves', came.direct, 'fill-open']]} />
+          <p className="hint">A join counts as through a link when the person joined a group or opened a question link within an hour of making their profile, the same rule slashtax uses for growth.</p>
+        </>}
+      </div>
+
+      <div className="panel">
+        <span className="label">Still answering, by the week people joined</span>
+        <Cohorts rows={g.cohorts} />
+        <p className="hint">Week 0 is the week they joined. Each cell is the share of that week's new people who answered anything that week. Blank weeks haven't happened yet.
+          {g.retention.week1 != null && ` Of people who joined at least 2 weeks ago, ${g.retention.week1}% answered something in their second week.`}</p>
+      </div>
+
+      <div className="panel">
+        <span className="label">Friends and privacy</span>
+        <div className="stats">
+          <div className="stat"><b>{g.friends.avg ?? 0}</b><span>friends per person</span></div>
+          <div className="stat"><b>{g.friends.with_any ?? 0}%</b><span>have a friend</span></div>
+          <div className="stat"><b>{g.friends.in_groups ?? 0}%</b><span>in a group</span></div>
+        </div>
+        {g.visibility.public != null && <>
+          <span className="hint">Who could see new answers, last {g.days} days</span>
+          <Split unit="%" parts={[['Public', g.visibility.public, 'fill-solid'], ['Friends', g.visibility.friends, 'fill-dither'], ['Private', g.visibility.private, 'fill-open']]} />
+        </>}
+      </div>
+
+      <div className="stats">
+        <div className="stat"><b>{g.slashes.minted}</b><span>slashes made this week</span></div>
+        <div className="stat"><b>{g.slashes.spent}</b><span>slashes spent this week</span></div>
+        <div className="stat"><b>{pct(g.slashes.spent, g.slashes.minted) ?? '–'}{g.slashes.minted ? '%' : ''}</b><span>spent of made</span></div>
+      </div>
+
+      <p className="hint">Totals and percentages only: nothing here names or points at a person. Accounts with unlimited slashes are left out, the same as the nightly economy record. Days are UK days; this week means the last 7 days including today.</p>
+    </div>
+  );
+}
+
+// v by day as a line, with the 1.0 target dashed. Tap or hover for a day's number.
+function Spark({ points, target, label }) {
+  const [at, setAt] = useState(null);
+  if (points.length < 2) return null;
+  const W = 400, H = 90, pad = 4;
+  const max = Math.max(target * 1.25, ...points.map(p => p.y));
+  const x = i => pad + (i * (W - 2 * pad)) / (points.length - 1);
+  const y = val => H - pad - (val / max) * (H - 2 * pad);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.y).toFixed(1)}`).join('');
+  const shown = at ?? points.length - 1;
+  return (
+    <figure className="chart" aria-label={label}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${label}: ${points.map(p => `${shortDay(p.x)} ${p.y.toFixed(2)}`).join(', ')}`}
+        onPointerLeave={() => setAt(null)}>
+        <line x1={pad} x2={W - pad} y1={y(target)} y2={y(target)} className="target" />
+        <path d={d} className="line" />
+        <circle cx={x(shown)} cy={y(points[shown].y)} r="4" className="dot" />
+        {points.map((p, i) => (
+          <rect key={p.x} x={x(i) - (W / points.length) / 2} y="0" width={W / points.length} height={H} fill="transparent"
+            onPointerEnter={() => setAt(i)} onClick={() => setAt(i)} />
+        ))}
+      </svg>
+      <figcaption className="hint">{shortDay(points[shown].x)}: {points[shown].y.toFixed(2)} · dashed line is 1.00</figcaption>
+    </figure>
+  );
+}
+
+function DailyChart({ rows }) {
+  const [metric, setMetric] = useState('answerers');
+  const [at, setAt] = useState(null);
+  const [key, name, unit, partKey] = METRICS.find(m => m[0] === metric);
+  const partName = partKey === 'link_signups' ? 'through a link' : 'answered in time';
+  const max = Math.max(1, ...rows.map(r => r[key]));
+  const shown = rows[at ?? rows.length - 1];
+  const total = rows.reduce((n, r) => n + r[key], 0);
+  const W = 400, H = 120, gap = rows.length > 40 ? 1 : 2, bw = (W - gap * (rows.length - 1)) / rows.length;
+  return (
+    <div className="panel">
+      <span className="label">Day by day</span>
+      <Filters value={metric} onChange={m => { setMetric(m); setAt(null); }} options={METRICS.map(([k, l]) => [k, l])} />
+      <figure className="chart">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" onPointerLeave={() => setAt(null)}
+          aria-label={`${name} per day: ${rows.map(r => `${shortDay(r.day)} ${r[key]}`).join(', ')}`}>
+          <line x1="0" x2={W} y1={H - 0.5} y2={H - 0.5} className="base" />
+          {rows.map((r, i) => {
+            const h = (r[key] / max) * (H - 4);
+            const ph = partKey ? (r[partKey] / max) * (H - 4) : 0;
+            const xx = i * (bw + gap);
+            return (
+              <g key={r.day} onPointerEnter={() => setAt(i)} onClick={() => setAt(i)} className={at === i ? 'on' : ''}>
+                <rect x={xx} y="0" width={bw + gap} height={H} fill="transparent" />
+                {h > 0 && <rect x={xx} y={H - h} width={bw} height={h} className={partKey ? 'bar open' : 'bar'} />}
+                {ph > 0 && <rect x={xx} y={H - ph} width={bw} height={ph} className="bar" />}
+              </g>
+            );
+          })}
+        </svg>
+        <figcaption className="hint">
+          <b>{shortDay(shown.day)}</b>: {shown[key]} {unit(shown[key])}{partKey ? `, ${shown[partKey]} ${partName}` : ''} · {total} over the {rows.length} days, at most {max === 1 && !rows.some(r => r[key]) ? 0 : max} a day
+        </figcaption>
+        {partKey && <div className="legend hint"><span><i className="sw fill-solid" />{partName}</span><span><i className="sw fill-open" />the rest</span></div>}
+      </figure>
+    </div>
+  );
+}
+
+// A 100% bar split into up to three parts, each with its own fill, then the numbers.
+function Split({ parts, unit = '' }) {
+  const total = parts.reduce((n, p) => n + Number(p[1] || 0), 0) || 1;
+  return (
+    <>
+      <div className="mix" role="img" aria-label={parts.map(([l, n]) => `${l} ${n}${unit}`).join(', ')}>
+        {parts.filter(p => p[1] > 0).map(([l, n, fill]) => <i key={l} className={`sw ${fill}`} style={{ flexGrow: n / total }} title={`${l}: ${n}${unit}`} />)}
+      </div>
+      <div className="legend hint">
+        {parts.map(([l, n, fill]) => <span key={l}><i className={`sw ${fill}`} />{l} <b>{n}{unit}</b>{!unit ? ` (${pct(n, total)}%)` : ''}</span>)}
+      </div>
+    </>
+  );
+}
+
+function Cohorts({ rows }) {
+  if (!rows.length) return <p className="hint">Nobody has joined in the last 8 weeks.</p>;
+  return (
+    <div className="cohorts" role="table" aria-label="Share of each week's new people still answering">
+      <div role="row" className="hint"><span role="columnheader">Joined</span><span role="columnheader">People</span>
+        {[0, 1, 2, 3, 4].map(w => <span role="columnheader" key={w}>Wk {w}</span>)}</div>
+      {rows.map(r => (
+        <div role="row" key={r.week}>
+          <span role="cell">{shortDay(r.week)}</span>
+          <span role="cell" className="num">{r.size}</span>
+          {r.active.map((p, w) => (
+            <span role="cell" key={w} className="num cell"
+              style={p == null ? undefined : { background: `color-mix(in srgb, var(--yes) ${Math.round(p * 0.45)}%, var(--surface))` }}>
+              {p == null ? '' : `${p}%`}
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
