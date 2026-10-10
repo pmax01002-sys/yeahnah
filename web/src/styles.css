@@ -119,8 +119,19 @@ button.split { width: 100%; padding: 0; background: none; text-align: left; }   
 .stat-row { display: flex; flex-direction: column; gap: 3px; }
 .stat-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
 .stat-head span:first-child { font-family: var(--display); font-size: 13px; }
-.sheet.stats h3 { margin: 8px 0 0; }
-.sheet.stats h2 { margin: 0; }
+.card-stats { display: flex; flex-direction: column; gap: 10px; }
+.card-stats h3 { margin: 8px 0 0; }
+.back-top { justify-content: space-between; }
+/* Flipping a card to its stats: it turns edge-on (lifting a touch), the other face swaps in,
+   then springs flat with a little overshoot, like the deck's own moves. */
+.card.flip-out { animation: flip-out .16s cubic-bezier(.5, 0, .9, .5) forwards; }
+.card.flip-in { animation: flip-in .5s cubic-bezier(.25, 1.6, .5, 1); }
+.card.flip-out.to-front { animation-name: flip-out-back; }
+.card.flip-in.to-front { animation-name: flip-in-back; }
+@keyframes flip-out { to { transform: perspective(1000px) rotateY(90deg) scale(1.04); } }
+@keyframes flip-in { from { transform: perspective(1000px) rotateY(-90deg) scale(1.04); } to { transform: perspective(1000px) rotateY(0) scale(1); } }
+@keyframes flip-out-back { to { transform: perspective(1000px) rotateY(-90deg) scale(1.04); } }
+@keyframes flip-in-back { from { transform: perspective(1000px) rotateY(90deg) scale(1.04); } to { transform: perspective(1000px) rotateY(0) scale(1); } }
 .meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--ink); }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: var(--b) solid var(--ink); border-radius: 7px; overflow: hidden; }
 .seg button { border: 0; border-right: var(--b) solid var(--ink); background: var(--surface); padding: 5px 0; font-family: var(--display); font-size: 13px; color: var(--ink); }

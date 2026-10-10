@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { supabase, configured, call } from './supabase.js';
 import { Px } from './icons.jsx';
-import { useDeckMotion } from './deckMotion.js';
+import { useDeckMotion, reducedMotion } from './deckMotion.js';
 import { PowerUpArt, RARITY } from './powerupArt.jsx';
 import { Avatar, AvatarPicker, teamOf } from './avatars.jsx';
 import Admin, { useAdminSummary } from './Admin.jsx';
@@ -494,7 +493,19 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
-  const [stats, setStats] = useState(false);
+  // Tapping the bar flips the card over to its stats, and back.
+  const [back, setBack] = useState(false);
+  const [turning, setTurning] = useState('');
+  const [toFront, setToFront] = useState(false);
+  const flip = () => {
+    if (turning) return;
+    if (reducedMotion()) { setBack(b => !b); return; }
+    setToFront(back); setTurning('out');
+  };
+  const turned = e => {
+    if (e.target !== e.currentTarget) return; // the bar's own grow animation bubbles here too
+    if (turning === 'out') { setBack(b => !b); setTurning('in'); } else setTurning('');
+  };
   const challenge = inbox.find(c => c.question_id === q.id);
   const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
 
@@ -556,13 +567,13 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
         </div>
         {split && (
           <>
-            <button type="button" className={`split${q.option_yes ? ' pick' : ''}${deck ? ' tall' : ''}`} onClick={() => setStats(true)}
+            <button type="button" className={`split${q.option_yes ? ' pick' : ''}${deck ? ' tall' : ''}`} onClick={flip}
               aria-label={`${pct}% ${word(q, true)}, ${100 - pct}% ${word(q, false)}. See more stats`}>
               <div className="y" style={{ width: `${pct}%` }}>{pct}% {short(q, true)}</div>
               <div className="n">{100 - pct}% {short(q, false)}</div>
             </button>
             <div className="meta">
-              <span>{split.total} answer{split.total === 1 ? '' : 's'} so far · <button type="button" className="linkbtn" onClick={() => setStats(true)}>More stats</button></span>
+              <span>{split.total} answer{split.total === 1 ? '' : 's'} so far · <button type="button" className="linkbtn" onClick={flip}>More stats</button></span>
               {friendAns.map(f => <span key={f.handle}>{f.display_name}: {word(q, f.value)}</span>)}
             </div>
           </>
@@ -586,7 +597,6 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
           ? <button className="linkbtn" onClick={() => act('answer', { p_question: q.id, p_value: !mine.value }, 'Changed. That was today\'s change of mind.')}>
               Change my answer to {word(q, !mine.value).toLowerCase()} ({d.me.changes_left_today > 1 || inPocket(d, 'second_thoughts').length ? `${d.me.changes_left_today === 1 ? '1 change' : `${d.me.changes_left_today} changes`} left today` : '1 a day'})</button>
           : <p className="hint">You've used today's change of mind.</p>)}
-        {stats && <StatsSheet q={q} mine={mine} friendAns={friendAns} onClose={() => setStats(false)} />}
         {q.created_by === d.me.id && <ShareLink q={q} />}
         {canSend && (sending
           ? <SendPanel q={q} d={d} reload={reload} friendAns={friendAns} onClose={() => setSending(false)} />
@@ -595,8 +605,22 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
     );
   }
 
+  const cls = `card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}${turning ? ` flip-${turning}${toFront ? ' to-front' : ''}` : ''}`;
+  if (back && mine) {
+    return (
+      <div className={`${cls} card-back`} onAnimationEnd={turned}>
+        <div className="inline back-top">
+          <span className="chip">Stats</span>
+          <button type="button" className="close" onClick={flip}>Flip back</button>
+        </div>
+        <h2 className="qtext">{q.text}</h2>
+        <StatsBack q={q} mine={mine} friendAns={friendAns} />
+      </div>
+    );
+  }
+
   return (
-    <div className={`card${small ? ' small' : ''}${deck ? ' deck-card' : ''}${tintOf(q, d)}`}>
+    <div className={cls} onAnimationEnd={turned}>
       <Chips q={q}>
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
         {d.hot.includes(q.id) && <span className="chip hot"><Px name="Hot ones" scale={1} /> Hot</span>}
@@ -615,7 +639,7 @@ function QuestionCard({ q, small, deck, noAnswers, d, reload, now, inbox, open }
 }
 
 // ---------------------------------------------------------------------------
-// Stats behind the bar: tap it for the split among friends, groups, age groups,
+// The back of the card: tap the bar to flip it over for the split among friends, groups, age groups,
 // over time, and who guessed what in Future. Counts only, and each follows the
 // same rules as the names you can see (question_stats in the database).
 // ---------------------------------------------------------------------------
@@ -637,7 +661,7 @@ function StatRow({ q, label, yes, total, unit = ['answer', 'answers'] }) {
   );
 }
 
-function StatsSheet({ q, mine, friendAns, onClose }) {
+function StatsBack({ q, mine, friendAns }) {
   const [s, setS] = useState(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -656,11 +680,8 @@ function StatsSheet({ q, mine, friendAns, onClose }) {
   const last = points[points.length - 1];
   const over = all && (!last || last.total !== all.total) ? [...points, { day: null, yes: all.yes, total: all.total }] : points;
 
-  return createPortal(
-    <div className="scrim" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="sheet stats" role="dialog" aria-modal="true" aria-label="Answer stats">
-        <div className="sheet-top"><button type="button" className="close" onClick={onClose}>Close</button></div>
-        <h2>{q.text}</h2>
+  return (
+    <div className="card-stats">
         {!s && <p className="hint">{error || 'Counting…'}</p>}
         {s && (
           <>
@@ -703,9 +724,7 @@ function StatsSheet({ q, mine, friendAns, onClose }) {
             )}
           </>
         )}
-      </div>
-    </div>,
-    document.querySelector('.app') || document.body,
+    </div>
   );
 }
 
