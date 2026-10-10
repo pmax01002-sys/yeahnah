@@ -23,6 +23,7 @@
   --b: 2px;
   --daily: #FFE3F3;                                       /* tint for today's question, from the desk pink */
   --friend: #DDF2E4;                                      /* tint for a question a friend sent, from the yeah green */
+  --mail: var(--desk);                                    /* the letter on Today for questions friends sent you */
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FF6EC7' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");    /* the pixel Y/N, 20x7 */
   color-scheme: light;
 }
@@ -34,6 +35,7 @@
   --hi: #9FF58A; --hi-ink: #0C120D;
   --daily: #1E2A12;
   --friend: #0F2E1F;
+  --mail: #FF6EC7;
   --yes: #9FF58A; --no: #FFB35C; --oa: #9FF58A; --ob: #FFB35C; --sen: #FF6EC7;
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%239FF58A' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%239FF58A' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FFB35C' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");
   color-scheme: dark;
@@ -75,7 +77,8 @@ button:disabled { cursor: not-allowed; background: var(--surface) !important; co
 .nav button:last-child { border-right: 0; }
 .nav button .ico { height: 24px; display: flex; align-items: center; }
 .nav button[aria-current="page"] { background: var(--hi); color: var(--hi-ink); }
-.badge { position: absolute; top: 4px; right: calc(50% - 22px); background: var(--no); color: var(--surface); font-size: 10px; border: 1px solid var(--surface); padding: 0 4px; }
+/* A pink letter on Today while a question a friend sent you is still waiting for your answer. */
+.nav .letter { position: absolute; top: 2px; right: calc(50% - 31px); display: flex; padding: 2px; background: var(--surface); color: var(--ink); --px-r: var(--mail); }
 
 h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; line-height: 1.15; text-wrap: balance; }
 h2 { font-size: 20px; }
