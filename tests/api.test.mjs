@@ -615,6 +615,7 @@ test('effect cards: kept in a pocket, used on a question, and checked on the ser
 
   // Overtime: an hour more on a question a friend sent you.
   const exp = async () => new Date((await ok(c.from('challenges').select('expires_at').eq('question_id', q1).single())).expires_at).getTime();
+  await ok(c.rpc('see_question', { p_question: q1 }));
   const t0 = await exp();
   await fails(c.rpc('use_power', { p_kind: 'overtime', p_question: q1 }), /don't have an Overtime/);
   await give(c, 'overtime');
@@ -782,7 +783,7 @@ test('link guests: answer 5 before signing up, saved without using up the day', 
   assert.ok(hand[0].linked);
   assert.ok(!hand.some(q => q.id === daily.id), "today's question is kept for after signing up");
   assert.ok((await ok(anon.rpc('guest_split', { p_code: code, p_question: others[0] }))).total >= 0);
-  assert.equal(await ok(anon.rpc('guest_hand', { p_code: 'no-such-link' })).length, 0);
+  assert.equal((await ok(anon.rpc('guest_hand', { p_code: 'no-such-link' }))).length, 0);
   await fails(anon.rpc('claim_guest_answers', { p_answers: [] }));
 
   const guest = await user('guest', '1990-01-01');
@@ -794,6 +795,51 @@ test('link guests: answer 5 before signing up, saved without using up the day', 
   assert.equal(after.daily_done, false);
   // Only once per account.
   assert.equal(await ok(guest.rpc('claim_guest_answers', { p_answers: [{ question_id: daily.id, value: true }] })), 0);
+});
+
+test("a friend's timer starts the first time the question is on screen, not when it was sent", async () => {
+  const ukToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const host = await user('tmhost', '1990-10-10'), pal = await user('tmpal', '1991-10-10');
+  const g = await ok(host.rpc('create_group', { p_name: 'Timers' }));
+  await ok(pal.rpc('join_group', { p_code: g.invite_code }));
+  const palId = (await me(pal)).id;
+  const [q1, q2, q3] = others.slice(13, 16);
+  for (const q of [q1, q2, q3]) await ok(host.rpc('answer', { p_question: q, p_value: true }));
+  await ok(host.rpc('send_challenge', { p_handle: pal.handle, p_question: q1, p_minutes: 1 }));
+  await ok(host.rpc('send_challenge', { p_handle: pal.handle, p_question: q2, p_minutes: 60 }));
+  await ok(host.rpc('send_challenge', { p_handle: pal.handle, p_question: q3, p_minutes: 1 }));
+  const row = q => ok(pal.from('challenges').select('minutes,seen_at,expires_at').eq('question_id', q).single());
+
+  // Not started: no end time, so it can't run out however long it waits.
+  assert.deepEqual(await row(q1), { minutes: 1, seen_at: null, expires_at: 'infinity' });
+
+  // On screen: the minute starts now, and seeing it again doesn't restart it.
+  assert.equal(await ok(pal.rpc('see_question', { p_question: q1 })), 1);
+  const seen = await row(q1);
+  assert.equal(new Date(seen.expires_at) - new Date(seen.seen_at), 60e3);
+  assert.equal(await ok(pal.rpc('see_question', { p_question: q1 })), 0);
+  assert.equal((await row(q1)).expires_at, seen.expires_at);
+  // Nobody else can start it.
+  assert.equal(await ok(host.rpc('see_question', { p_question: q2 })), 0);
+  assert.equal((await row(q2)).seen_at, null);
+
+  // Once it has run out, answering earns nothing.
+  await ok(admin.from('challenges').update({ expires_at: new Date(Date.now() - 1000).toISOString() })
+    .eq('question_id', q1).eq('to_user', palId));
+  const c0 = (await me(pal)).credits;
+  await ok(pal.rpc('answer', { p_question: q1, p_value: true }));
+  assert.equal((await me(pal)).credits, c0);
+  // Answered before it was ever on screen: in time, and it counts as seen then.
+  await ok(pal.rpc('answer', { p_question: q2, p_value: true }));
+  assert.equal((await me(pal)).credits, c0 + 2);
+  const r2 = await row(q2);
+  assert.equal(new Date(r2.expires_at) - new Date(r2.seen_at), 60 * 60e3);
+
+  // Overtime on one not opened yet starts it, then adds the hour.
+  await ok(admin.from('pocket').insert({ user_id: palId, kind: 'overtime', expires_on: ukToday }));
+  await ok(pal.rpc('use_power', { p_kind: 'overtime', p_question: q3 }));
+  const r3 = await row(q3);
+  assert.equal(new Date(r3.expires_at) - new Date(r3.seen_at), 61 * 60e3);
 });
 
 test('growth dashboard: admins only, totals only', async () => {
