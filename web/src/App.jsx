@@ -361,7 +361,11 @@ function Signed() {
         {TABS.map(([k, ico, label]) => (
           <button key={k} aria-current={!adminOpen && tab === k ? 'page' : 'false'} onClick={() => { setTab(k); setSheet(null); setAdminOpen(false); }}>
             <span className="ico"><Px name={ico} /></span>{label}
-            {k === 'friends' && inbox.length > 0 && <span className="badge">{inbox.length}</span>}
+            {k === 'today' && inbox.length > 0 && (
+              <span className="letter" title={`${inbox.length} ${inbox.length === 1 ? 'question' : 'questions'} from friends`}>
+                <Px name="letter" label={`${inbox.length} ${inbox.length === 1 ? 'question' : 'questions'} from friends to answer`} />
+              </span>
+            )}
           </button>
         ))}
       </nav>
