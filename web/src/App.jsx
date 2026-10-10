@@ -338,7 +338,8 @@ function useData() {
   const reload = useCallback(async () => {
     const me = await call('my_profile');
     if (!me) return setD({ me: null });
-    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup, kinds, pocket, hot] = await Promise.all([
+    const [questions, mine, follows, challenges, predictions, groups, members, config, stars, unlock, powerup, kinds, pocket, hot,
+      pack, packs, deals, badges] = await Promise.all([
       supabase.from('questions').select('*').order('id'),
       supabase.from('statements').select('*').eq('user_id', me.id).is('superseded_at', null),
       supabase.from('follows').select('follower,followed'),
@@ -355,6 +356,11 @@ function useData() {
       supabase.from('pocket').select('*').gte('got_at', new Date(Date.now() - 9 * 864e5).toISOString()).order('got_at'),
       // Hot ones need the 2026-10-28 database update; until it runs, there are none.
       call('hot_questions').catch(() => []),
+      // Question packs and badges need the 2026-11-10 database update; until it runs, there are none.
+      call('todays_pack').catch(() => null),
+      supabase.from('packs').select('id,name,pack_questions(question_id,position,typical)'),
+      supabase.from('pack_deals').select('pack_id'),
+      supabase.from('user_badges').select('badge,earned_at,badges(name,blurb)').order('earned_at'),
     ]);
     // No question for today (the hourly timer may not be running): fill the day, then read the questions again.
     if (!questions.data.some(q => q.daily_date === todayUK())) {
@@ -379,6 +385,16 @@ function useData() {
     const person = Object.fromEntries(people.map(p => [p.id, p]));
     const iFollow = new Set(follows.data.filter(f => f.follower === me.id).map(f => f.followed));
     const followsMe = new Set(follows.data.filter(f => f.followed === me.id).map(f => f.follower));
+    // Each pack question's pack and place in it. Packs are dealt whole, so their
+    // questions never come up one by one; mine marks packs you've been dealt
+    // (today's may be dealt by the same load, so it counts too).
+    const dealt = new Set((deals.data || []).map(r => r.pack_id));
+    if (pack) dealt.add(pack.id);
+    const packOf = {};
+    for (const pk of packs.data || []) {
+      const qs = [...pk.pack_questions].sort((a, b) => a.position - b.position);
+      qs.forEach((x, k) => { packOf[x.question_id] = { name: pk.name, n: k + 1, of: qs.length, mine: dealt.has(pk.id) }; });
+    }
     setD({
       me,
       cfg: Object.fromEntries((config.data || []).map(c => [c.key, c.value])),
@@ -397,6 +413,8 @@ function useData() {
       kinds: kindOf,
       pocket: (pocket.data || []).filter(r => kindOf[r.kind]).map(r => ({ ...r, ...kindOf[r.kind], kind: r.kind })),
       groups: groupRows.map(g => ({ ...g, members: memberRows.filter(m => m.group_id === g.id).map(m => m.user_id) })),
+      pack, packOf,
+      badges: badges.error ? null : badges.data.map(b => ({ slug: b.badge, earned_at: b.earned_at, ...b.badges })),
     });
   }, []);
   useEffect(() => { reload(); }, [reload]);
@@ -609,10 +627,12 @@ function VisibilityPicker({ q, d, value, onChange, label }) {
   );
 }
 
-// Green for a question written for friends or sent by a friend, pink for today's question.
+// Green for a question written for friends or sent by a friend, pink for today's
+// question, and the pack colour for a question in a pack you've been dealt.
 function tintOf(q, d) {
   if (q.audience === 'friends' || d.challenges.some(c => c.to_user === d.me.id && c.question_id === q.id)) return ' friend';
-  return q.daily_date === todayUK() ? ' daily' : '';
+  if (q.daily_date === todayUK()) return ' daily';
+  return d.packOf[q.id]?.mine ? ' pack' : '';
 }
 
 function QuestionCard({ q, small, deck, onScreen = true, noAnswers, d, reload, now, inbox, open }) {
@@ -638,6 +658,7 @@ function QuestionCard({ q, small, deck, onScreen = true, noAnswers, d, reload, n
   };
   const challenge = inbox.find(c => c.question_id === q.id);
   const sentBy = d.challenges.find(c => c.to_user === d.me.id && c.question_id === q.id);
+  const inPack = d.packOf[q.id]?.mine && d.packOf[q.id];
   // A friend's timer starts once this card is on screen with the app open.
   const waiting = inbox.some(c => c.question_id === q.id && unseen(c));
   useEffect(() => {
@@ -767,14 +788,16 @@ function QuestionCard({ q, small, deck, onScreen = true, noAnswers, d, reload, n
       <Chips q={q}>
         {q.daily_date === todayUK() && <span className="chip daily">Today's question</span>}
         {d.hot.includes(q.id) && <span className="chip hot"><Px name="Hot ones" scale={1} /> Hot</span>}
-        {starrable(q) && (deck ? d.stars.has(q.id) : !mine || d.stars.has(q.id)) && <StarToggle q={q} d={d} reload={reload} chip />}
+        {starrable(q, d) && (deck ? d.stars.has(q.id) : !mine || d.stars.has(q.id)) && <StarToggle q={q} d={d} reload={reload} chip />}
         {sentBy ? <span className="chip friend">From {d.person[sentBy.from_user]?.display_name || 'a friend'}</span>
           : q.audience === 'friends' && <span className="chip friend">{q.created_by === d.me.id ? 'Your question'
             : d.person[q.created_by] ? `By ${d.person[q.created_by].display_name}` : 'Shared with you'}</span>}
         {challenge && <span className="chip timer"><Px name="timer" scale={1} /> {timeLeft(challenge, now)}</span>}
+        {inPack && <span className="chip pack">{inPack.name} · {inPack.n} of {inPack.of}</span>}
       </Chips>
       <h2 className="qtext">{q.text}</h2>
       {challenge && !mine && <p className="hint">Answer before the timer runs out for {d.cfg.challenge_reward ?? 2} slashes. Doesn't count towards your daily answers.</p>}
+      {inPack && !mine && !challenge && <p className="hint">Part of your {inPack.name}, so it doesn't count towards your daily answers.</p>}
       {body}
       <Msg error={error} note={note} />
     </div>
@@ -968,12 +991,13 @@ function Row({ q, d, open, extra, reload, star }) {
       <span>{locked ? <Px name="lock" label="Locked" /> : mine ? <Pill q={q} v={mine.value} /> : null}</span>
     </button>
   );
-  return star && starrable(q) ? <div className="row-star">{row}<StarToggle q={q} d={d} reload={reload} /></div> : row;
+  return star && starrable(q, d) ? <div className="row-star">{row}<StarToggle q={q} d={d} reload={reload} /></div> : row;
 }
 
 // Starred questions you haven't answered are dealt into Today first. Questions
-// written for friends and world events aren't dealt, so they can't be starred.
-const starrable = q => q.audience !== 'friends' && !q.is_event;
+// written for friends, world events and pack questions aren't dealt one by one,
+// so they can't be starred.
+const starrable = (q, d) => q.audience !== 'friends' && !q.is_event && !d.packOf[q.id];
 function StarToggle({ q, d, reload, chip }) {
   const [on, setOn] = useState(d.stars.has(q.id));
   const [error, setError] = useState('');
@@ -1014,6 +1038,17 @@ function shuffleIn(deck, newIds, from) {
   return out;
 }
 
+// Puts a block of cards, kept together, at a random spot among the next few after
+// the card on top, and stays on that card.
+function placeBlock(h, block) {
+  const top = h.ids[h.i];
+  const rest = h.ids.filter(id => !block.includes(id));
+  const from = Math.max(rest.indexOf(top), 0);
+  const at = Math.min(from + 1 + Math.floor(Math.random() * Math.min(4, rest.length - from)), rest.length);
+  const ids = [...rest.slice(0, at), ...block, ...rest.slice(at)];
+  return { ...h, ids, i: Math.max(ids.indexOf(top), 0), seen: [...new Set([...h.seen, ...block])] };
+}
+
 // Unanswered questions in a random order, mixed so the same theme doesn't come up twice in a row.
 function interleave(qs) {
   qs = shuffle(qs);
@@ -1025,10 +1060,11 @@ function interleave(qs) {
 }
 
 // Questions that can be dealt: approved, unanswered, not today's or a future
-// daily, and sensitive ones only if you've opted in.
+// daily, not in a pack (packs are dealt whole), and sensitive ones only if
+// you've opted in.
 function dealable(d, today, skip) {
   const qs = interleave(d.questions.filter(q => !q.is_event && q.status === 'approved' && !d.mine[q.id]
-    && (!q.daily_date || q.daily_date < today) && !skip.has(q.id)
+    && (!q.daily_date || q.daily_date < today) && !skip.has(q.id) && !d.packOf[q.id]
     && (q.sensitivity !== 'sensitive' || d.me.sensitive_opt_in)));
   // Questions friends wrote come first, then starred ones, then hot ones
   // (hottest first), then the rest.
@@ -1042,6 +1078,9 @@ function dealable(d, today, skip) {
 // slashes to claim; rarer ones hold more. It's a card in the hand like any
 // other, under the id PU, and stays there once claimed.
 const PU = 'powerup';
+// A question pack is dealt as one block: a cover card under the id PACK, then
+// the pack's questions in order. It stays in Today until every one is answered.
+const PACK = 'pack';
 const ukDate = t => new Date(t).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 
 // What each effect card does, and how it's used.
@@ -1141,6 +1180,45 @@ function PowerUpCard({ p, d, reload }) {
   );
 }
 
+// A pack's cover card. Its questions follow it in the hand; answering them
+// doesn't use up the day's answers, and the last one earns the pack's badge.
+// A star-sign pack ends by saying how typical of the sign your answers were.
+function PackCard({ pack, d }) {
+  const qs = pack.questions.filter(x => d.byId[x.id]);
+  const answered = qs.filter(x => d.mine[x.id]);
+  const left = qs.length - answered.length;
+  const done = pack.finished || left === 0;
+  const scored = qs.filter(x => x.typical != null);
+  const like = scored.filter(x => d.mine[x.id]?.value === x.typical).length;
+  const sign = pack.sign;
+  const verdict = !done || !sign || !scored.length ? ''
+    : like === scored.length ? `Textbook ${sign}: all ${like} answers are what a ${sign} would say.`
+      : like === 0 ? `Not very ${sign}: none of your answers are what a ${sign} would say.`
+        : `${like * 2 > scored.length ? 'Mostly' : 'Barely'} ${sign}: ${like} of ${scored.length} answers are what a ${sign} would say.`;
+  return (
+    <div className={`card deck-card pack-card${done ? ' finished' : ''}`}>
+      <div className="chips">
+        <span className="chip pack">Pack</span>
+        <span className="chip">{plural(qs.length, 'card')}</span>
+      </div>
+      <div className="pu-art pack-art" aria-hidden="true">
+        <Px name={pack.sign || d.byId[qs[0]?.id]?.category} scale={5} />
+        <span className="w">{done ? 'Finished' : `${answered.length} of ${qs.length} answered`}</span>
+      </div>
+      <h2 className="qtext">{pack.name}</h2>
+      <p className="hint">{pack.blurb}</p>
+      {done ? (
+        <>
+          {verdict && <p className="fx">{verdict}</p>}
+          {pack.badge && <p className="pu-done"><Px name="star-on" /> {pack.badge} badge added to your profile.</p>}
+        </>
+      ) : (
+        <p className="hint">Swipe on for its {plural(left, 'card')}. Pack answers don't use up your daily answers{pack.badge ? `, and finishing earns the ${pack.badge} badge` : ''}.</p>
+      )}
+    </div>
+  );
+}
+
 // Effect cards used on a question card: Peek, Mind reader, Overtime and Called it.
 function CardPowers({ q, d, reload, challenge, split, friendAns }) {
   const [error, setError] = useState('');
@@ -1221,24 +1299,31 @@ function Today(ctx) {
     .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
     .map(st => st.question_id);
   const extraToday = d.pocket.filter(r => r.effect === 'extra_hand' && r.used_at && ukDate(r.used_at) === today).length;
+  // Today's pack: its cover card, then its questions, leaving out any answered on an earlier day.
+  const pack = d.pack;
+  const packIds = pack ? [PACK, ...pack.questions.map(x => x.id)
+    .filter(id => d.byId[id] && id !== daily?.id && (!d.mine[id] || answeredToday.includes(id)))] : [];
+  const packDone = !!pack && pack.questions.every(x => !d.byId[x.id] || d.mine[x.id]);
   // Five cards a day: today's question first, then what you've answered today,
   // then enough you haven't answered to make five, in a shuffled order.
   // Questions friends send you are extra cards on top.
   const [hand, setHand] = useState(() => {
     const kept = loadHand(uid, today);
     if (kept && Array.isArray(kept.ids)) {
-      const ids = kept.ids.filter(id => (id === PU ? d.powerup : d.byId[id]));
+      const ids = kept.ids.filter(id => (id === PU ? d.powerup : id === PACK ? pack : d.byId[id]));
       return { ids, i: Math.min(kept.i || 0, Math.max(ids.length - 1, 0)), seen: kept.seen || ids, extra: kept.extra || 0 };
     }
     const first = daily ? [daily.id] : [];
-    const done = answeredToday.filter(id => !first.includes(id));
+    const done = answeredToday.filter(id => !first.includes(id) && !packIds.includes(id));
     // Enough to make five, or as many answers as you have left today if that's more.
     const left = daily ? d.me.other_answers_left_today : d.me.answers_left_today;
     const fresh = dealable(d, today, new Set([...first, ...done, ...inboxIds])).slice(0, Math.max(size - first.length - done.length, left, 0));
     const ids = [...first, ...done, ...fresh];
     // Today's power-up, if there is one, goes somewhere after the first card you haven't answered.
     if (d.powerup) ids.splice(first.length + done.length + 1 + Math.floor(Math.random() * fresh.length), 0, PU);
-    return { ids, i: Math.max(ids.findIndex(id => !d.mine[id]), 0), seen: ids, extra: extraToday };
+    // Today's pack goes in as one block, somewhere after the first card you haven't answered.
+    if (packIds.length) ids.splice(first.length + done.length + 1 + Math.floor(Math.random() * (ids.length - first.length - done.length)), 0, ...packIds);
+    return { ids, i: Math.max(ids.findIndex(id => (id === PACK ? !packDone : !d.mine[id])), 0), seen: ids, extra: extraToday };
   });
   // A daily question set after this hand was dealt becomes the next card.
   useEffect(() => {
@@ -1290,6 +1375,16 @@ function Today(ctx) {
       return { ...h, ids, i: Math.max(0, Math.min(h.i > k ? h.i - 1 : h.i, ids.length - 1)) };
     });
   }, [!!d.powerup]);
+  // A pack that turns up after the hand was dealt goes in as one block among the next few cards.
+  useEffect(() => {
+    setHand(h => {
+      const has = h.ids.includes(PACK);
+      if (!!pack === has) return h;
+      if (pack) return placeBlock(h, packIds);
+      const k = h.ids.indexOf(PACK), ids = h.ids.filter(id => id !== PACK);
+      return { ...h, ids, i: Math.max(0, Math.min(h.i > k ? h.i - 1 : h.i, ids.length - 1)) };
+    });
+  }, [pack?.id]);
   useEffect(() => saveHand(uid, today, hand), [hand]);
 
   const [note, setNote] = useState('');
@@ -1297,11 +1392,12 @@ function Today(ctx) {
 
   const n = hand.ids.length;
   const byFriend = id => d.byId[id]?.audience === 'friends';
-  // Today's question, questions friends sent you and friends wrote don't use up your daily answers.
-  const counts = id => id === daily?.id || inboxIds.includes(id) || byFriend(id);
+  // Today's question, questions friends sent you and friends wrote, and pack questions don't use up your daily answers.
+  const inPack = id => packIds.includes(id);
+  const counts = id => id === daily?.id || inboxIds.includes(id) || byFriend(id) || inPack(id);
   const fromFriend = id => d.challenges.some(c => c.to_user === uid && c.question_id === id);
-  // Today's question, questions friends sent and starred ones stay put until answered.
-  const canSwap = id => id !== PU && !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
+  // Today's question, questions friends sent, starred ones and the pack stay put until answered.
+  const canSwap = id => id !== PU && id !== PACK && !inPack(id) && !d.mine[id] && id !== daily?.id && !fromFriend(id) && !d.stars.has(id);
   const swappable = hand.ids.filter(canSwap);
   // Cards come up in this order: today's question, questions friends sent you
   // (least time left first), questions friends wrote (free, so they're extra
@@ -1400,9 +1496,10 @@ function Today(ctx) {
         </div>
       ) : (
         <div className="deck">
-          {hand.ids.filter(id => (id === PU ? d.powerup : d.byId[id])).map(id => (
+          {hand.ids.filter(id => (id === PU ? d.powerup : id === PACK ? pack : d.byId[id])).map(id => (
             <div key={id} ref={motion.cardRef(id)} className={`slot${slots[id] === 0 ? ' top' : ''}`}>
               {id === PU ? <PowerUpCard p={d.powerup} d={d} reload={ctx.reload} />
+                : id === PACK ? <PackCard pack={pack} d={d} />
                 : <QuestionCard q={d.byId[id]} deck onScreen={slots[id] === 0} noAnswers={!d.mine[id] && !counts(id) && d.me.other_answers_left_today <= 0} {...ctx} />}
             </div>
           ))}
@@ -1416,6 +1513,9 @@ function Today(ctx) {
               {hand.ids.map((id, k) => (id === PU ? (
                 <button key={id} className={`dot powerup ${d.powerup?.rarity}${d.powerup?.claimed ? ' done' : ''}`} aria-current={k === hand.i}
                   aria-label={`Card ${k + 1}, power-up${d.powerup?.claimed ? ', claimed' : ''}`} onClick={() => jump(k)} />
+              ) : id === PACK ? (
+                <button key={id} className={`dot pack-cover${packDone ? ' done' : ''}`} aria-current={k === hand.i}
+                  aria-label={`Card ${k + 1}, ${pack?.name || 'pack'}${packDone ? ', finished' : ''}`} onClick={() => jump(k)} />
               ) : (
                 <button key={id} className={`dot${d.mine[id] ? ' done' : ''}${tintOf(d.byId[id], d)}`} aria-current={k === hand.i}
                   aria-label={`Card ${k + 1}${d.mine[id] ? ', answered' : ''}`} onClick={() => jump(k)} />
@@ -1446,12 +1546,14 @@ function Questions(ctx) {
   const [theme, setTheme] = useState(null);
   const sent = new Set(inbox.map(c => c.question_id));
   const F = { all: 'All', open: 'Not answered', starred: 'Starred', sent: 'Sent to you', standard: 'Standard', personal: 'Personal', sensitive: 'Sensitive' };
-  const qs = d.questions.filter(q => !q.is_event && q.status === 'approved');
+  // Pack questions are only listed once you've been dealt their pack.
+  const qs = d.questions.filter(q => !q.is_event && q.status === 'approved' && (!d.packOf[q.id] || d.packOf[q.id].mine));
   const byTheme = {};
   for (const q of qs) {
-    const t = byTheme[q.category] || (byTheme[q.category] = { name: q.category, total: 0, done: 0 });
+    const t = byTheme[q.category] || (byTheme[q.category] = { name: q.category, total: 0, done: 0, packed: 0 });
     t.total++;
     if (d.mine[q.id]) t.done++;
+    if (d.packOf[q.id]) t.packed++;
   }
   const themes = Object.values(byTheme).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
   // Hot ones: the most starred and answered lately, a theme of their own on top
@@ -1468,7 +1570,7 @@ function Questions(ctx) {
   const picked = theme === HOT ? hotTheme : byTheme[theme];
   return (
     <>
-      <MakeQuestion {...ctx} themes={themes.map(t => t.name).filter(n => n !== 'Friends')} />
+      <MakeQuestion {...ctx} themes={themes.filter(t => t.name !== 'Friends' && t.packed < t.total).map(t => t.name)} />
       <div className="themes" role="group" aria-label="Themes">
         {tiles.map(t => (
           <button key={t.name} className={`theme${t.name === HOT ? ' hot' : ''}`} aria-pressed={theme === t.name} onClick={() => setTheme(theme === t.name ? null : t.name)}>
@@ -2001,6 +2103,27 @@ function Profile({ d, reload }) {
         <div className="stat"><b>{hr.rate ?? '–'}{hr.rate != null && '%'}</b><span>hit rate</span></div>
       </div>
       <Msg error={error} />
+
+      {/* Badges need the 2026-11-10 database update; until it runs, the section stays hidden. */}
+      {d.badges && (
+        <div className="section"><h2>Badges</h2>
+          <div className="panel">
+            {d.badges.length === 0
+              ? <p className="empty">Finish a question pack in Today to earn your first badge.</p>
+              : (
+                <div className="badges">
+                  {d.badges.map(b => (
+                    <div className="badge" key={b.slug}>
+                      <span className="badge-art"><Px name={b.name} scale={3} /></span>
+                      <span><b>{b.name}</b><span className="hint">{b.blurb} Earned {new Date(b.earned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.</span></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            <p className="hint">Only you can see your badges for now.</p>
+          </div>
+        </div>
+      )}
 
       <div className="section"><h2>Your yes/no profile</h2>
         <div className="panel">

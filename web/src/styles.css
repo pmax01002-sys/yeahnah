@@ -23,6 +23,7 @@
   --b: 2px;
   --daily: #FFE3F3;                                       /* tint for today's question, from the desk pink */
   --friend: #DDF2E4;                                      /* tint for a question a friend sent, from the yeah green */
+  --pack: #E4EAFB;                                        /* tint for a question pack, from the option blue */
   --mail: var(--desk);                                    /* the letter on Today for questions friends sent you */
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%231D7A45' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%23141414' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FF6EC7' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");    /* the pixel Y/N, 20x7 */
   color-scheme: light;
@@ -35,6 +36,7 @@
   --hi: #9FF58A; --hi-ink: #0C120D;
   --daily: #1E2A12;
   --friend: #0F2E1F;
+  --pack: #141A33;
   --mail: #FF6EC7;
   --yes: #9FF58A; --no: #FFB35C; --oa: #9FF58A; --ob: #FFB35C; --sen: #FF6EC7;
   --logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 7' shape-rendering='crispEdges'%3E%3Cpath fill='%239FF58A' d='M0 0h2v2h-2zM5 0h2v2h-2zM1 2h2v1h-2zM4 2h2v1h-2zM2 3h3v4h-3z'/%3E%3Cpath fill='%239FF58A' d='M10 0h2v2h-2zM9 2h2v3h-2zM8 5h2v2h-2z'/%3E%3Cpath fill='%23FFB35C' d='M13 0h2v1h-2zM18 0h2v3h-2zM13 1h3v1h-3zM13 2h4v1h-4zM13 3h2v4h-2zM16 3h4v1h-4zM17 4h3v1h-3zM18 5h2v2h-2z'/%3E%3C/svg%3E");
@@ -236,6 +238,8 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 .dot { width: 14px; height: 14px; padding: 0; border: var(--b) solid var(--ink); background: var(--surface); }
 .dot.daily { background: var(--daily); }
 .dot.friend { background: var(--friend); }
+.dot.pack { background: var(--pack); }
+.dot.pack-cover { width: 24px; background: var(--pack); }
 .dot.done { background: var(--ink); }
 .dot[aria-current="true"] { transform: translateY(-3px); box-shadow: 2px 2px 0 var(--ink); }
 .deck-end { text-align: left; }
@@ -262,12 +266,26 @@ button.chip:active { background: var(--hi); color: var(--hi-ink); }
 button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
 .chip.group { border-style: dashed; }
 
-/* Today's question is pink, a question a friend sent is green. */
+/* Today's question is pink, a question a friend sent is green, and a question pack is blue. */
 .card.daily { background: var(--daily); }
 .chip.daily { background: var(--daily); font-weight: 600; }
 .card.friend { background: var(--friend); }
 .chip.friend { background: var(--friend); font-weight: 600; }
-.card.daily .panel, .card.friend .panel { background: transparent; }
+.card.pack { background: var(--pack); }
+.chip.pack { background: var(--pack); font-weight: 600; }
+.card.daily .panel, .card.friend .panel, .card.pack .panel { background: transparent; }
+
+/* A question pack's cover card in Today (PackCard): the art panel from the power-up cards, with the pack's icon. */
+.card.pack-card { gap: 8px; background: var(--pack); }
+.card.pack-card .chip.pack { background: var(--hi); color: var(--hi-ink); }
+.card.pack-card .fx { margin: 0; font-family: var(--display); font-weight: 600; font-size: 15px; line-height: 1.3; }
+.pack-art .px { width: auto; height: min(40cqh, 132px); }
+/* Profile: badges earned by finishing packs. */
+.badges { display: grid; gap: 10px; }
+.badge { display: flex; align-items: center; gap: 12px; }
+.badge-art { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border: var(--b) solid var(--ink); background: var(--pack); box-shadow: 2px 2px 0 var(--ink); }
+.badge b { display: block; font-family: var(--display); }
+.badge .hint { display: block; margin: 0; }
 @media (prefers-reduced-motion: reduce) { .deck .split .y { animation: none !important; } }
 
 /* Effect cards in use: the powers on a question card, and the Wildcard's picks on its own card.
