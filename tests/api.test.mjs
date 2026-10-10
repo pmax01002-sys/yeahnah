@@ -699,3 +699,30 @@ test('admins review suggestions, reports and feedback; everyone else is kept out
     await ok(admin.from('admins').delete().eq('user_id', modId));
   }
 });
+
+test('admins set the daily question; an empty day fills itself', async () => {
+  const boss = await user('boss', '1990-01-01');
+  const bossId = (await me(boss)).id;
+  const ukToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  await fails(boss.rpc('admin_daily'), /Only admins/);
+  await ok(admin.from('admins').insert({ user_id: bossId }));
+  try {
+    const qid = await ok(boss.rpc('admin_create_question', { p_text: `Daily check ${run}?`, p_category: 'General' }));
+    const before = (await ok(admin.from('questions').select('id').eq('daily_date', ukToday).maybeSingle()))?.id;
+    await ok(boss.rpc('admin_set_daily', { p_question: qid, p_date: ukToday }));
+    assert.equal((await ok(admin.from('questions').select('id').eq('daily_date', ukToday).single())).id, qid);
+    await fails(boss.rpc('admin_set_daily', { p_question: qid, p_date: '2000-01-01' }), /today or a later day/);
+    const day = (await ok(boss.rpc('admin_daily'))).days.find(x => x.date === ukToday);
+    assert.equal(day.question.id, qid);
+
+    // Taking today's question down leaves the day empty until ensure_daily, which anyone signed in can run.
+    await ok(boss.rpc('admin_set_question', { p_question: qid, p_status: 'rejected' }));
+    await ok(alice.rpc('ensure_daily'));
+    const now = await ok(admin.from('questions').select('id,status').eq('daily_date', ukToday).single());
+    assert.notEqual(now.id, qid);
+    assert.equal(now.status, 'approved');
+    if (before) await ok(boss.rpc('admin_set_daily', { p_question: before, p_date: ukToday }));
+  } finally {
+    await ok(admin.from('admins').delete().eq('user_id', bossId));
+  }
+});

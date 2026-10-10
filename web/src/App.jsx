@@ -237,6 +237,11 @@ function useData() {
       // Kept effect cards: a Wildcard keeps for 7 days, so a little over a week is enough.
       supabase.from('pocket').select('*').gte('got_at', new Date(Date.now() - 9 * 864e5).toISOString()).order('got_at'),
     ]);
+    // No question for today (the hourly timer may not be running): fill the day, then read the questions again.
+    if (!questions.data.some(q => q.daily_date === todayUK())) {
+      try { await call('ensure_daily'); questions.data = (await supabase.from('questions').select('*').order('id')).data || questions.data; }
+      catch { /* before the 2026-10-26 database update; carry on without one */ }
+    }
     const kindOf = Object.fromEntries((kinds.data || []).map(k => [k.kind, k]));
     const ids = new Set();
     follows.data.forEach(f => { ids.add(f.follower); ids.add(f.followed); });
@@ -947,6 +952,12 @@ function Today(ctx) {
     if (d.powerup) ids.splice(first.length + done.length + 1 + Math.floor(Math.random() * fresh.length), 0, PU);
     return { ids, i: Math.max(ids.findIndex(id => !d.mine[id]), 0), seen: ids, extra: extraToday };
   });
+  // A daily question set after this hand was dealt becomes the next card.
+  useEffect(() => {
+    if (daily && !hand.ids.includes(daily.id)) {
+      setHand(h => h.ids.includes(daily.id) ? h : { ...h, ids: [...h.ids.slice(0, h.i), daily.id, ...h.ids.slice(h.i)], seen: [...h.seen, daily.id] });
+    }
+  }, [daily?.id]);
   // Extra hand: more cards right after the one you're on.
   useEffect(() => {
     setHand(h => {

@@ -6,7 +6,7 @@ import { call } from './supabase.js';
 // checked in the database too, so this screen opening is not the protection.
 // ---------------------------------------------------------------------------
 
-const SECTIONS = [['review', 'Review'], ['questions', 'Questions'], ['reports', 'Reports'], ['feedback', 'Feedback'], ['log', 'Audit log']];
+const SECTIONS = [['review', 'Review'], ['daily', 'Daily'], ['questions', 'Questions'], ['reports', 'Reports'], ['feedback', 'Feedback'], ['log', 'Audit log']];
 const who = h => (h ? `@${h}` : 'the SQL Editor');
 const when = t => (t ? new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
@@ -65,6 +65,7 @@ export default function Admin({ summary, onChanged, onClose, themes }) {
         ))}
       </div>
       {section === 'review' && <QuestionList {...ctx} status="pending" key="review" />}
+      {section === 'daily' && <Daily {...ctx} />}
       {section === 'questions' && <QuestionList {...ctx} key="all" />}
       {section === 'reports' && <Reports {...ctx} />}
       {section === 'feedback' && <Feedback {...ctx} />}
@@ -296,13 +297,14 @@ function FeedbackRow({ f, onChanged }) {
 // Audit log: every change to a question for everyone, newest first
 // ---------------------------------------------------------------------------
 
-const ACTION = { submitted: 'Suggested', approved: 'Approved', rejected: 'Rejected', reopened: 'Back to review', edited: 'Edited', refunded: 'Slashes refunded' };
+const ACTION = { submitted: 'Suggested', approved: 'Approved', rejected: 'Rejected', reopened: 'Back to review', edited: 'Edited', refunded: 'Slashes refunded', daily: 'Daily question' };
 
 function describe(e) {
   if (e.action === 'edited') {
     return Object.keys(e.new_value || {}).map(k => `${k}: "${e.old_value?.[k] ?? ''}" → "${e.new_value[k] ?? ''}"`).join('; ');
   }
   if (e.action === 'refunded') return `${e.new_value?.slashes} slashes`;
+  if (e.action === 'daily') return e.new_value?.daily_date ? `Set for ${e.new_value.daily_date}` : `Taken off ${e.old_value?.daily_date ?? 'its day'}`;
   if (e.action === 'submitted') return e.new_value?.category ? `Theme: ${e.new_value.category}` : '';
   return '';
 }
@@ -324,6 +326,111 @@ function AuditLog({ question, onAll }) {
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Daily question: what's on each day, and picking or writing one
+// ---------------------------------------------------------------------------
+
+const dayLabel = (date, today) => {
+  const diff = Math.round((new Date(date) - new Date(today)) / 864e5);
+  const name = new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return diff === 0 ? `Today · ${name}` : diff === 1 ? `Tomorrow · ${name}` : name;
+};
+
+function Daily({ onChanged, themes }) {
+  const [info, load, error] = useList('admin_daily', { p_days: 14 });
+  const [picking, setPicking] = useState(null);
+  const [err, setErr] = useState('');
+  const changed = async () => { setPicking(null); await load(); onChanged(); };
+  async function clear(date) {
+    setErr('');
+    try { await call('admin_set_daily', { p_question: null, p_date: date }); await changed(); } catch (e) { setErr(e.message); }
+  }
+  if (!info) return <Err error={error} />;
+  return (
+    <>
+      <p className="hint">One question for everyone each day, shown first in Today. Empty days are filled from the bank in order ({info.bank_left} unused questions left).
+        {!info.timer && ' The hourly timer isn\'t running on this database, so the app fills an empty day when someone opens it. To turn the timer on, enable pg_cron under Database > Extensions in Supabase and run the update again.'}</p>
+      <Err error={error || err} />
+      <div className="rows">
+        {info.days.map(day => {
+          const past = day.date < info.today;
+          const q = day.question;
+          return (
+            <div className="panel" key={day.date} style={past ? { opacity: 0.6 } : day.date === info.today ? { background: 'var(--daily)' } : undefined}>
+              <span className="label">{dayLabel(day.date, info.today)}</span>
+              {q ? <strong>{q.text}</strong> : <span className="hint">{past ? 'No daily question' : 'Empty: the bank fills it the day before'}</span>}
+              {q && <span className="hint">{q.category} · {q.answers} answer{q.answers === 1 ? '' : 's'}{q.status !== 'approved' ? ` · ${q.status}, so it will be replaced` : ''}</span>}
+              {!past && picking !== day.date && (
+                <div className="inline" style={{ flexWrap: 'wrap' }}>
+                  <button className="ghost" onClick={() => setPicking(day.date)}>{q ? 'Change' : 'Choose'}</button>
+                  {q && day.date !== info.today && <button className="ghost" onClick={() => clear(day.date)}>Clear</button>}
+                </div>
+              )}
+              {picking === day.date && (
+                <DailyPicker date={day.date} isToday={day.date === info.today} answered={q ? q.answers : 0}
+                  themes={themes} onDone={changed} onCancel={() => setPicking(null)} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function DailyPicker({ date, isToday, answered, themes, onDone, onCancel }) {
+  const [mode, setMode] = useState('pick');
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [rows] = useList('admin_questions', { p_status: 'approved', p_search: query || null, p_limit: 30 });
+  const [text, setText] = useState('');
+  const [category, setCategory] = useState('General');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const usable = (rows || []).filter(q => !q.is_event && (!q.daily_date || q.daily_date >= date));
+
+  async function use(id) {
+    if (isToday && answered > 0
+        && !window.confirm(`${answered} people already answered today's question. Swap it anyway? Their answers stay, but it stops being the daily question.`)) return;
+    setError(''); setBusy(true);
+    try {
+      const qid = id ?? await call('admin_create_question', { p_text: text, p_category: category });
+      await call('admin_set_daily', { p_question: qid, p_date: date });
+      await onDone();
+    } catch (e) { setError(e.message); setBusy(false); }
+  }
+  return (
+    <>
+      <Filters value={mode} onChange={setMode} options={[['pick', 'Pick from the bank'], ['write', 'Write a new one']]} />
+      {mode === 'pick' ? <>
+        <form className="inline" onSubmit={e => { e.preventDefault(); setQuery(search.trim()); }}>
+          <input type="search" placeholder="Search text or theme" value={search} onChange={e => setSearch(e.target.value)} />
+          <button className="ghost">Search</button>
+        </form>
+        {rows && usable.length === 0 && <p className="empty">No live questions match.</p>}
+        {usable.map(q => (
+          <div className="toggle-row" key={q.id}>
+            <span>{q.text} <span className="hint">· {q.category}{q.daily_date ? ` · set for ${q.daily_date}` : ''}</span></span>
+            <button className="ghost" disabled={busy} onClick={() => use(q.id)}>Use</button>
+          </div>
+        ))}
+      </> : (
+        <form className="field" onSubmit={e => { e.preventDefault(); use(null); }}>
+          <label className="field"><span className="label">Question for everyone</span>
+            <input required minLength={5} maxLength={140} value={text} onChange={e => setText(e.target.value)} placeholder="Would you rather..." /></label>
+          <select aria-label="Theme" value={category} onChange={e => setCategory(e.target.value)}
+            style={{ border: '1px solid var(--ink)', padding: '6px 8px', background: 'var(--surface)' }}>
+            {[...new Set([...themes, 'General'])].map(t => <option key={t}>{t}</option>)}
+          </select>
+          <button className="solid" disabled={busy}>Add it and use it</button>
+        </form>
+      )}
+      <Err error={error} />
+      <button className="linkbtn" onClick={onCancel}>Cancel</button>
     </>
   );
 }
