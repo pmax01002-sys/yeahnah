@@ -255,3 +255,20 @@ button.chip[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); 
 /* Group tab: a friend's row opens their profile */
 .person-row .agree { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .linkbtn.back { display: inline-flex; align-items: center; gap: 6px; margin: 4px 2px 0; text-decoration: none; font-family: var(--display); font-size: 13px; }
+/* Avatars: 16x16 sprites at whole-number scales. The tone is the team: green Yeah, red Nah. */
+:root { --av-red: var(--no); --av-green: var(--yes); }
+:root[data-theme="phosphor"] { --av-green: #55B84A; }  /* Phosphor's yeah is the ink colour, so the green team needs its own */
+.av { display: block; flex: none; border: var(--b) solid var(--ink); }
+.who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.me-head { display: flex; align-items: center; gap: 14px; justify-content: flex-start; }
+.me-head > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.av-btn { background: none; border: 0; padding: 0; }
+.av-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.av-team { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: var(--b) solid var(--ink); background: var(--surface); font-family: var(--display); font-size: 14px; font-weight: 600; }
+.av-team.green { color: var(--av-green); } .av-team.red { color: var(--av-red); }
+.av-team[aria-pressed="true"] { box-shadow: inset 0 0 0 2px currentColor; outline: var(--b) solid currentColor; outline-offset: -6px; }
+.av-team[aria-pressed="true"].green { background: var(--friend); }
+.av-team[aria-pressed="true"].red { background: var(--daily); }
+.av-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.av-grid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--ink); background: var(--surface); font-family: var(--display); font-size: 12px; }
+.av-grid button[aria-pressed="true"] { background: var(--hi); color: var(--hi-ink); }
