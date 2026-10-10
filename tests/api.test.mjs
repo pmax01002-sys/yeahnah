@@ -864,3 +864,33 @@ test('growth dashboard: admins only, totals only', async () => {
     await ok(admin.from('admins').delete().eq('user_id', gId));
   }
 });
+
+test('answer stats: friends, groups, age groups and days, following who sees what', async () => {
+  const [s1, s2, s3, s4] = await Promise.all(['stat1', 'stat2', 'stat3', 'stat4'].map(n => user(n, '1990-01-01')));
+  const q = (await ok(admin.from('questions').insert({ text: `Stats check ${run}?`, category: 'General' }).select('id').single())).id;
+  const g = await ok(s1.rpc('create_group', { p_name: 'Stats lot' }));
+  await ok(s2.rpc('join_group', { p_code: g.invite_code }));
+  await ok(s3.rpc('join_group', { p_code: g.invite_code }));
+
+  assert.equal(await ok(s1.rpc('question_stats', { p_question: q })), null, 'nothing before you answer');
+  await ok(s1.rpc('answer', { p_question: q, p_value: true, p_visibility: 'public' }));
+  await ok(s2.rpc('answer', { p_question: q, p_value: false, p_visibility: 'private' }));
+  await ok(s3.rpc('answer', { p_question: q, p_value: true, p_visibility: 'friends' }));
+  await ok(s4.rpc('answer', { p_question: q, p_value: false, p_visibility: 'public' }));
+
+  let st = await ok(s1.rpc('question_stats', { p_question: q }));
+  assert.deepEqual(st.everyone, { yes: 2, total: 4 }, 'everyone matches the bar');
+  assert.deepEqual(st.friends, { yes: 1, total: 1 }, "a friend's private answer stays out");
+  assert.deepEqual(st.groups, [{ name: 'Stats lot', yes: 2, total: 2 }]);
+  assert.deepEqual(st.ages, [], 'two public answers is too few for an age group');
+  assert.deepEqual(st.days.map(p => p.total), [4]);
+  assert.equal(st.guesses, null);
+
+  // A third public answer in the same age group lets it show.
+  await ok(s3.rpc('set_visibility', { p_question: q, p_visibility: 'public' }));
+  st = await ok(s1.rpc('question_stats', { p_question: q }));
+  assert.deepEqual(st.ages, [{ band: '35–44', yes: 2, total: 3 }]);
+
+  assert.equal(await ok(alice.rpc('question_stats', { p_question: q })), null);
+  await fails(createClient(URL, ANON, opts).rpc('question_stats', { p_question: q }));
+});

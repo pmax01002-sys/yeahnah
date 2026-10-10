@@ -11,7 +11,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 // has settled. At rest a card has no transform at all, so its text stays crisp.
 // ---------------------------------------------------------------------------
 
-const reduced = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // k is stiffness, c is damping: less damping, more bounce.
 const SPRING = {
@@ -20,6 +20,7 @@ const SPRING = {
   tilt: { k: 140, c: 14 },
   scale: { k: 380, c: 14 },
 };
+const reduced = reducedMotion;
 const CALM = { k: 500, c: 45 }; // no overshoot, for reduced motion
 const KEYS = ['x', 'y', 'r', 's', 'rx', 'ry'];
 const SPRING_OF = { x: 'pos', y: 'pos', r: 'lean', s: 'scale', rx: 'tilt', ry: 'tilt' };
